@@ -10,7 +10,8 @@
  * place.
  */
 import { prisma } from "@/lib/prisma";
-import { toDateOnly } from "@/lib/date";
+import { toDateOnly, today, addDaysToDate } from "@/lib/date";
+import { format } from "date-fns";
 
 /** A single day's Contribution row for a given plan, if one was recorded. */
 export async function findContributionForPlanAndDate(
@@ -163,6 +164,79 @@ export async function countMissedSystemWide(date: Date): Promise<number> {
   return prisma.contribution.count({
     where: { collectionDate: toDateOnly(date), status: "MISSED" },
   });
+}
+
+/** One calendar day's aggregated collection activity, for the 31-Day Tracker. */
+export interface DailyTrackingDay {
+  /** yyyy-MM-dd — stable key for React lists and tooltips. */
+  date: string;
+  /** Short display label, e.g. "27 Jul". */
+  label: string;
+  /** Day-of-month only, e.g. "27" — shown inside the tracker cell. */
+  dayOfMonth: string;
+  /** Sum of COLLECTED amounts recorded on this day. */
+  totalAmount: number;
+  /** Number of COLLECTED rows recorded on this day. */
+  collectedCount: number;
+  /** Number of MISSED rows recorded on this day. */
+  missedCount: number;
+}
+
+/**
+ * A rolling 31-day (default) series of daily collection activity, ending
+ * today — the shared data source for the "31-Day Tracking" grid shown on
+ * both the Admin Dashboard (system-wide, no `agentId`) and the Agent
+ * Dashboard (scoped to `agentId`). One query fetches every Contribution row
+ * in the window, then the rows are bucketed by calendar day in memory so
+ * every day in the range is represented (including days with zero activity)
+ * rather than only the days that happen to have a row.
+ */
+export async function getDailyTrackingSeries(
+  options: { agentId?: string; days?: number } = {}
+): Promise<DailyTrackingDay[]> {
+  const days = options.days ?? 31;
+  const end = today();
+  const start = addDaysToDate(end, -(days - 1));
+
+  const rows = await prisma.contribution.findMany({
+    where: {
+      collectionDate: { gte: start, lte: end },
+      ...(options.agentId ? { collectedById: options.agentId } : {}),
+    },
+    select: { collectionDate: true, status: true, amount: true },
+  });
+
+  const byDateKey = new Map<
+    string,
+    { totalAmount: number; collectedCount: number; missedCount: number }
+  >();
+  for (const row of rows) {
+    const key = format(row.collectionDate, "yyyy-MM-dd");
+    const bucket = byDateKey.get(key) ?? { totalAmount: 0, collectedCount: 0, missedCount: 0 };
+    if (row.status === "COLLECTED") {
+      bucket.collectedCount += 1;
+      bucket.totalAmount += Number(row.amount ?? 0);
+    } else {
+      bucket.missedCount += 1;
+    }
+    byDateKey.set(key, bucket);
+  }
+
+  const series: DailyTrackingDay[] = [];
+  for (let i = 0; i < days; i++) {
+    const date = addDaysToDate(start, i);
+    const key = format(date, "yyyy-MM-dd");
+    const bucket = byDateKey.get(key) ?? { totalAmount: 0, collectedCount: 0, missedCount: 0 };
+    series.push({
+      date: key,
+      label: format(date, "d MMM"),
+      dayOfMonth: format(date, "d"),
+      totalAmount: bucket.totalAmount,
+      collectedCount: bucket.collectedCount,
+      missedCount: bucket.missedCount,
+    });
+  }
+  return series;
 }
 
 export interface ContributionReportOptions {

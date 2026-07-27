@@ -15,12 +15,14 @@ import {
   countByAgentAndDate,
   sumOutstandingForAgent,
   listCustomerIdsNotVisited,
+  getDailyTrackingSeries,
 } from "@/server/repositories/contribution.repository";
 import { today, weekRange, monthRange } from "@/lib/date";
 import { DashboardHeader } from "@/components/layout/DashboardHeader";
 import { DashboardNav } from "@/components/layout/DashboardNav";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
+import { MonthlyTrackerGrid } from "@/components/dashboard/MonthlyTrackerGrid";
 import Link from "next/link";
 
 const AGENT_NAV_LINKS = [
@@ -32,16 +34,25 @@ const AGENT_NAV_LINKS = [
 export default async function AgentDashboardPage() {
   const user = await requireRole("AGENT");
 
-  const [myCustomers, todayCounts, totalToday, totalWeek, totalMonth, outstanding, notVisited] =
-    await Promise.all([
-      listCustomerProfiles({ agentId: user.id }),
-      countByAgentAndDate(user.id, today()),
-      sumCollectedByAgent(user.id, { start: today(), end: today() }),
-      sumCollectedByAgent(user.id, weekRange()),
-      sumCollectedByAgent(user.id, monthRange()),
-      sumOutstandingForAgent(user.id),
-      listCustomerIdsNotVisited(user.id, today()),
-    ]);
+  const [
+    myCustomers,
+    todayCounts,
+    totalToday,
+    totalWeek,
+    totalMonth,
+    outstanding,
+    notVisited,
+    trackingSeries,
+  ] = await Promise.all([
+    listCustomerProfiles({ agentId: user.id }),
+    countByAgentAndDate(user.id, today()),
+    sumCollectedByAgent(user.id, { start: today(), end: today() }),
+    sumCollectedByAgent(user.id, weekRange()),
+    sumCollectedByAgent(user.id, monthRange()),
+    sumOutstandingForAgent(user.id),
+    listCustomerIdsNotVisited(user.id, today()),
+    getDailyTrackingSeries({ agentId: user.id }), // this agent's last 31 days
+  ]);
 
   const activeCustomerCount = myCustomers.filter((c) => c.user.isActive).length;
 
@@ -67,6 +78,14 @@ export default async function AgentDashboardPage() {
           <StatCard label="Total This Month" value={`₦${totalMonth.toLocaleString()}`} />
           <StatCard label="Outstanding Collections" value={`₦${outstanding.toLocaleString()}`} tone="amber" />
         </div>
+
+        <Card>
+          <MonthlyTrackerGrid
+            title="31-Day Tracking"
+            subtitle="Your collection activity for the most recent 31 days."
+            series={trackingSeries}
+          />
+        </Card>
 
         <Card>
           <div className="mb-4 flex items-center justify-between">

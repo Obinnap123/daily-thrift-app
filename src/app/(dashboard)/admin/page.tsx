@@ -15,6 +15,7 @@ import {
   sumCollectedSystemWide,
   countMissedSystemWide,
   listRecentContributionsSystemWide,
+  getDailyTrackingSeries,
 } from "@/server/repositories/contribution.repository";
 import { listPlansReadyForPayout } from "@/server/repositories/contribution-plan.repository";
 import { listRecentAgentAssignmentLogs } from "@/server/repositories/agent.repository";
@@ -23,6 +24,7 @@ import { DashboardHeader } from "@/components/layout/DashboardHeader";
 import { DashboardNav } from "@/components/layout/DashboardNav";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
+import { MonthlyTrackerGrid } from "@/components/dashboard/MonthlyTrackerGrid";
 import { format } from "date-fns";
 import Link from "next/link";
 
@@ -49,6 +51,7 @@ export default async function AdminDashboardPage() {
     missedToday,
     recentTransactions,
     recentAgentActivity,
+    trackingSeries,
   ] = await Promise.all([
     prisma.user.count({ where: { role: "CUSTOMER" } }),
     prisma.user.count({ where: { role: "CUSTOMER", isActive: true } }),
@@ -60,6 +63,7 @@ export default async function AdminDashboardPage() {
     countMissedSystemWide(today()),
     listRecentContributionsSystemWide(8),
     listRecentAgentAssignmentLogs(8),
+    getDailyTrackingSeries(), // system-wide, last 31 days
   ]);
 
   return (
@@ -100,6 +104,14 @@ export default async function AdminDashboardPage() {
               View Payouts ({dueForPayout.length} ready)
             </Link>
           </div>
+        </Card>
+
+        <Card>
+          <MonthlyTrackerGrid
+            title="31-Day Tracking (System-Wide)"
+            subtitle="Every day's collection activity across all agents, most recent 31 days."
+            series={trackingSeries}
+          />
         </Card>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">

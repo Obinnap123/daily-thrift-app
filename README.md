@@ -85,6 +85,8 @@ src/
     ui/                               # Button, Input, Select, Badge, Card
     layout/                           # DashboardHeader, DashboardNav
     providers/                        # SessionProvider
+    dashboard/                        # MonthlyTrackerGrid (31-Day Tracking, shared
+                                       #   by Admin + Agent dashboards)
     forms/                            # RegisterCustomerForm, ReassignAgentForm,
                                        #   CreatePlanForm, RecordContributionForm,
                                        #   SubmitReconciliationForm, ReviewReconciliationButtons,
@@ -195,12 +197,18 @@ prisma/
   hasn't been submitted yet; otherwise shows a read-only summary with a
   status badge (`SUBMITTED` / `APPROVED` / `REJECTED`) plus history of past
   reconciliations.
+- `/agent` also shows a **31-Day Tracking** grid (`MonthlyTrackerGrid`) of
+  this agent's own collection activity for the most recent 31 days — one
+  cell per calendar day, colored emerald (collected), red (missed), or gray
+  (no activity), with today's cell ring-highlighted.
 
 ### Admin oversight (`/admin`, `/admin/reconciliations`, `/admin/payouts`, `/admin/reports`)
 - `/admin` (**Admin Dashboard**): 10 metrics/feeds — total & active
   customers, total agents, missed payments today, collections
   today/this-week/this-month, customers due for payout, plus two live feeds
-  (Recent Transactions, Recent Agent Activities) and Quick Actions shortcuts.
+  (Recent Transactions, Recent Agent Activities) and Quick Actions shortcuts,
+  plus a system-wide **31-Day Tracking** grid (same `MonthlyTrackerGrid`
+  component as the Agent dashboard, but aggregated across every agent).
 - `/admin/reconciliations` (**Reconciliation review queue**): filterable by
   status (Submitted/Approved/Rejected/All); Admin approves or rejects each
   `SUBMITTED` row via `ReviewReconciliationButtons` (optional note on
@@ -296,6 +304,11 @@ pm2 logs webapp --nostream       # Check logs without blocking
   payments, collection totals across 3 windows, due-for-payout count, plus
   Recent Transactions / Recent Agent Activities feeds)
 - ✅ **Agent Collection Summary** — 9 per-agent metrics on `/agent`
+- ✅ **31-Day Tracking** — a rolling 31-day calendar-grid view of daily
+  collection activity, shared component (`MonthlyTrackerGrid`) on both
+  `/admin` (system-wide, every agent combined) and `/agent` (scoped to the
+  signed-in agent only), backed by `getDailyTrackingSeries()` in the
+  contribution repository
 - ✅ **Reports module** — Daily/Weekly/Monthly/Agent/Customer/Payout History
   report types, all built from one shared `buildReportTable()` function so
   the on-screen table and the exported file are always identical; **PDF**
