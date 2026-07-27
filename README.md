@@ -5,11 +5,12 @@
 - **Goal**: Manage a daily contribution/savings (thrift/Ajo-style) business —
   tracking customers, daily contributions collected by field agents, savings
   balances, and withdrawals, with full audit visibility for the admin.
-- **Status**: Step 2 complete (Authentication System: roles, customer
-  registration, agent assignment/rotation, role-scoped dashboards).
-  Business features (contribution recording, savings balance, withdrawals,
-  reports, receipts, notifications, backups) are being built incrementally
-  in later steps.
+- **Status**: Step 3 complete — Agent Management module (add/edit/
+  deactivate/search/paginate agents, bulk-assign customers) and Customer
+  Management module (unique customer codes, edit customer, passport photo
+  upload, search/filter/paginate customers). Business features (contribution
+  recording, savings balance, withdrawals, reports, receipts, notifications,
+  backups) are being built incrementally in later steps.
 
 ## Tech Stack
 - **Framework**: Next.js 16 (App Router) + React 19 + TypeScript
@@ -88,13 +89,40 @@ prisma/
    below) — there is no public sign-up page by design.
 2. Admin logs in at `/login` with **email** + password → lands on `/admin`.
    From there:
-   - `/admin/agents` → list agents; `/admin/agents/new` → create an Agent
-     (email + password; phone optional).
-   - `/admin/customers` → list **all** customers (across every agent);
-     `/admin/customers/new` → register a customer, choosing any active agent.
-   - `/admin/customers/[id]` → view a customer's profile, **rotate their
-     assigned agent** (with an optional note), and see the full assignment
-     history (audit trail).
+
+   **Agent Management** (`/admin/agents`):
+   - Search agents by name/email/phone, filter by Active/Inactive, paginate
+     (10 per page).
+   - "+ Add Agent" (`/admin/agents/new`) → create an Agent (email + password;
+     phone optional).
+   - Click "View / Edit" on any row → `/admin/agents/[id]`, where you can:
+     - **Edit Agent**: update name/email/phone.
+     - **Activate/Deactivate**: toggles login access. Deactivating an agent
+       who still has assigned customers shows a confirmation warning first —
+       their customers are **not** auto-reassigned (deliberate; do it via
+       "Assign Customers" or a customer's own "Rotate Agent").
+     - **Assign Customers to This Agent**: pick one or more customers
+       currently on other agents (filterable list with checkboxes), add an
+       optional reason, and bulk-move them onto this agent in one click.
+       Each customer moved gets its own audit-trail entry.
+     - See the agent's currently managed customers in a table below.
+
+   **Customer Management** (`/admin/customers`):
+   - Search by name/phone/ID number/customer code, filter by Active/Inactive,
+     paginate.
+   - "+ Register Customer" (`/admin/customers/new`) → register a customer,
+     choosing any active agent. A unique **customer code** (e.g.
+     `DDT-000123`) is generated automatically and shown in the success toast.
+   - Click "View" on any row → `/admin/customers/[id]`, where you can:
+     - See the profile summary (customer code, ID number, registration date,
+       current agent).
+     - **Edit Customer**: update name/phone/ID number.
+     - **Passport Photo**: upload or replace the customer's photo (JPEG/PNG/
+       WEBP, max 5MB) — shows a live preview before saving.
+     - **Rotate Agent**: reassign this one customer to a different agent
+       (with an optional note) — separate from the bulk "Assign Customers"
+       flow above; both write to the same audit trail.
+     - See the full agent-assignment history (audit trail) at the bottom.
 3. Agent logs in at `/login` with **email** + password → lands on `/agent`,
    which lists **only their own** assigned customers. "+ Register Customer"
    registers a new customer that is automatically assigned to themselves —
