@@ -22,15 +22,18 @@ import {
   reassignAgentSchema,
   editCustomerSchema,
   bulkAssignCustomersSchema,
+  deleteCustomerSchema,
   type RegisterCustomerInput,
   type ReassignAgentInput,
   type EditCustomerInput,
   type BulkAssignCustomersInput,
+  type DeleteCustomerInput,
 } from "@/validations/customer";
 import { findUserByPhone } from "@/server/repositories/user.repository";
 import {
   findCustomerProfileByIdNumber,
   findCustomerProfileWithUserId,
+  countCustomerFinancialActivity,
 } from "@/server/repositories/customer.repository";
 import { findAgentById } from "@/server/repositories/agent.repository";
 import { ok, fail, type ActionResult } from "@/lib/action-result";
@@ -347,6 +350,62 @@ export async function reassignCustomerAgent(
       },
     });
   });
+
+  return ok({ customerProfileId });
+}
+
+/**
+ * Permanently delete a customer registration — Admin only (re-verified in
+ * the Server Action, never trusted from the client).
+ * ----------------------------------------------------------------------------
+ * Deliberately blocked whenever the customer has ANY recorded Contribution
+ * or Payout row. This is a real financial/audit trail — once a single
+ * naira has been logged as collected (or paid out) for a customer, their
+ * record must be preserved forever, exactly like the reasoning behind
+ * "deactivate, don't delete" for Agents. A brand-new registration that was
+ * created by mistake (wrong person, duplicate entry, typo'd during setup)
+ * and has NEVER had a single payment recorded is the only case this is for
+ * — hence the zero-activity guard below.
+ *
+ * Deleting the CustomerProfile row cascades (onDelete: Cascade in the
+ * schema) to also remove its AgentAssignmentLog rows and the underlying
+ * User row (via the CustomerProfile -> User relation's own onDelete:
+ * Cascade) in the same transaction — Prisma's referential actions handle
+ * this automatically as part of a single delete, so no need for a manual
+ * multi-step teardown here.
+ */
+export async function deleteCustomer(
+  input: DeleteCustomerInput
+): Promise<ActionResult<{ customerProfileId: string }>> {
+  const parsed = deleteCustomerSchema.safeParse(input);
+  if (!parsed.success) {
+    return fail("Invalid request.");
+  }
+
+  const { customerProfileId } = parsed.data;
+
+  const existing = await findCustomerProfileWithUserId(customerProfileId);
+  if (!existing) {
+    return fail("Customer not found.");
+  }
+
+  const { contributionCount, payoutCount } = await countCustomerFinancialActivity(
+    customerProfileId
+  );
+  if (contributionCount > 0 || payoutCount > 0) {
+    return fail(
+      "This customer has recorded payments or payouts and cannot be deleted. " +
+        "Deactivate the customer's agent instead if they need to be removed from " +
+        "active collection, or contact support for a corrected record."
+    );
+  }
+
+  // Deleting the User row cascades to CustomerProfile (and from there to
+  // AgentAssignmentLog) via the schema's onDelete: Cascade relations —
+  // deleting the User (rather than the CustomerProfile directly) also
+  // removes their login account, which is the whole point of "delete this
+  // registration" rather than just "unlink this profile".
+  await prisma.user.delete({ where: { id: existing.userId } });
 
   return ok({ customerProfileId });
 }

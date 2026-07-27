@@ -22,6 +22,7 @@ import {
   updateCustomer,
   uploadCustomerPassportPhoto,
   bulkAssignCustomersToAgent,
+  deleteCustomer,
 } from "@/server/services/customer.service";
 import { findCustomerProfileWithUserId } from "@/server/repositories/customer.repository";
 import type {
@@ -29,6 +30,7 @@ import type {
   ReassignAgentInput,
   EditCustomerInput,
   BulkAssignCustomersInput,
+  DeleteCustomerInput,
 } from "@/validations/customer";
 import { fail } from "@/lib/action-result";
 import { revalidatePath } from "next/cache";
@@ -145,6 +147,25 @@ export async function bulkAssignCustomersAction(input: BulkAssignCustomersInput)
     revalidatePath("/admin/agents");
     revalidatePath(`/admin/agents/${input.agentId}`);
     revalidatePath("/admin/customers");
+  }
+
+  return result;
+}
+
+/**
+ * Permanently delete a customer registration — Admin only. The service
+ * layer's own zero-activity guard (see deleteCustomer()) is the real
+ * safety check; this action only enforces WHO may attempt it.
+ */
+export async function deleteCustomerAction(input: DeleteCustomerInput) {
+  await requireRole("ADMIN");
+
+  const result = await deleteCustomer(input);
+
+  if (result.success) {
+    revalidatePath("/admin/customers");
+    revalidatePath("/admin");
+    revalidatePath("/admin/agents");
   }
 
   return result;

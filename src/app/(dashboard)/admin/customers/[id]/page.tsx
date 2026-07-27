@@ -16,9 +16,12 @@ import { Badge } from "@/components/ui/Badge";
 import { ReassignAgentForm } from "@/components/forms/ReassignAgentForm";
 import { EditCustomerForm } from "@/components/forms/EditCustomerForm";
 import { PassportPhotoUpload } from "@/components/forms/PassportPhotoUpload";
-import { CreatePlanForm } from "@/components/forms/CreatePlanForm";
+import { DeleteCustomerButton } from "@/components/forms/DeleteCustomerButton";
+import { CustomerTrackingPanel } from "@/components/dashboard/CustomerTrackingPanel";
 import { getActivePlanWithProgress } from "@/server/services/contribution-plan.service";
 import { listPayoutsForCustomer } from "@/server/repositories/payout.repository";
+import { listContributionsForCustomer } from "@/server/repositories/contribution.repository";
+import { countCustomerFinancialActivity } from "@/server/repositories/customer.repository";
 import { format } from "date-fns";
 
 const ADMIN_NAV_LINKS = [
@@ -43,14 +46,19 @@ export default async function AdminCustomerDetailPage({
     notFound();
   }
 
-  const [activeAgents, planWithProgress, payoutHistory] = await Promise.all([
-    listActiveAgents(),
-    getActivePlanWithProgress(customer.id),
-    listPayoutsForCustomer(customer.id),
-  ]);
+  const [activeAgents, planWithProgress, payoutHistory, passbookRows, financialActivity] =
+    await Promise.all([
+      listActiveAgents(),
+      getActivePlanWithProgress(customer.id),
+      listPayoutsForCustomer(customer.id),
+      listContributionsForCustomer(customer.id),
+      countCustomerFinancialActivity(customer.id),
+    ]);
   const availableAgentsForReassignment = activeAgents.filter(
     (agent) => agent.id !== customer.assignedAgentId
   );
+  const canDelete =
+    financialActivity.contributionCount === 0 && financialActivity.payoutCount === 0;
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -123,35 +131,22 @@ export default async function AdminCustomerDetailPage({
             />
           </Card>
 
-          {/* Savings plan: progress if one is active, otherwise a form to start one */}
+          {/* Account status: Deactivate / Delete Registration */}
           <Card className="lg:col-span-1">
             <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-500">
-              Savings Plan
+              Danger Zone
             </h3>
-            {planWithProgress ? (
-              <dl className="space-y-3 text-sm">
-                <Row
-                  label="Daily amount"
-                  value={`₦${Number(planWithProgress.plan.dailyAmount).toLocaleString()}`}
-                />
-                <Row label="Total saved" value={`₦${planWithProgress.progress.totalSaved.toLocaleString()}`} />
-                <Row label="Days paid" value={String(planWithProgress.progress.daysPaid)} />
-                <Row label="Days missed" value={String(planWithProgress.progress.daysMissed)} />
-                <Row label="Days remaining" value={String(planWithProgress.progress.daysRemaining)} />
-                <Row
-                  label="Ref. maturity date"
-                  value={format(planWithProgress.plan.expectedMaturityDate, "dd MMM yyyy")}
-                />
-                <Row label="Status" value={<Badge tone="blue">{planWithProgress.plan.status}</Badge>} />
-              </dl>
-            ) : (
-              <>
-                <p className="mb-3 text-sm text-gray-500">
-                  No active savings plan. Start one to begin recording daily contributions.
-                </p>
-                <CreatePlanForm customerProfileId={customer.id} />
-              </>
-            )}
+            <p className="mb-4 text-sm text-gray-600">
+              Deleting a registration permanently removes this customer&apos;s login account and
+              profile. Only allowed when they have no recorded payments or payouts — otherwise
+              deactivate the agent instead of the customer, or contact support.
+            </p>
+            <DeleteCustomerButton
+              customerProfileId={customer.id}
+              customerName={customer.user.name}
+              canDelete={canDelete}
+              redirectTo="/admin/customers"
+            />
           </Card>
 
           {/* Payout history for this customer */}
@@ -200,6 +195,24 @@ export default async function AdminCustomerDetailPage({
               ))}
             </ol>
           </Card>
+        </div>
+
+        {/* Customer Tracking Dashboard: savings summary, progress bar,
+            digital passbook / payment history, and Quick Record Payment. */}
+        <div className="space-y-6">
+          <h2 className="text-lg font-semibold text-gray-900">Customer Tracking</h2>
+          <CustomerTrackingPanel
+            customerProfileId={customer.id}
+            planWithProgress={planWithProgress}
+            passbookRows={passbookRows}
+            isAdmin
+            quickPayCustomer={{
+              id: customer.id,
+              name: customer.user.name,
+              phone: customer.user.phone,
+              customerCode: customer.customerCode,
+            }}
+          />
         </div>
       </main>
     </div>

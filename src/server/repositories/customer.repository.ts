@@ -141,6 +141,22 @@ export async function findCustomerProfileWithUserId(customerProfileId: string) {
 }
 
 /**
+ * Count this customer's Contribution and Payout rows — the guard used by
+ * deleteCustomer() to decide whether a "delete registration" request is
+ * safe. A customer with ANY recorded payment or payout has real financial
+ * history that must never be erased (audit trail), so deletion is only
+ * ever allowed when both counts are zero — i.e. a registration that was
+ * created but never actually used yet. See customer.service.ts#deleteCustomer.
+ */
+export async function countCustomerFinancialActivity(customerProfileId: string) {
+  const [contributionCount, payoutCount] = await Promise.all([
+    prisma.contribution.count({ where: { customerProfileId } }),
+    prisma.payout.count({ where: { customerProfileId } }),
+  ]);
+  return { contributionCount, payoutCount };
+}
+
+/**
  * List active customers NOT currently assigned to the given agent — used
  * to populate the "assign customers to this agent" multi-select on the
  * Agent detail page (an agent obviously can't be assigned a customer

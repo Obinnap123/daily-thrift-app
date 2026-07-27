@@ -96,3 +96,14 @@ export const bulkAssignCustomersSchema = z.object({
 });
 
 export type BulkAssignCustomersInput = z.infer<typeof bulkAssignCustomersSchema>;
+
+/**
+ * Delete a customer registration — Admin only (see deleteCustomerSchema
+ * comment in customer.service.ts for why this is permanently blocked once
+ * the customer has ANY recorded financial activity).
+ */
+export const deleteCustomerSchema = z.object({
+  customerProfileId: z.string().min(1),
+});
+
+export type DeleteCustomerInput = z.infer<typeof deleteCustomerSchema>;

@@ -183,6 +183,7 @@ export default async function AgentDashboardPage() {
                   <th className="px-4 py-3 font-medium">Phone</th>
                   <th className="px-4 py-3 font-medium">ID Number</th>
                   <th className="px-4 py-3 font-medium">Status</th>
+                  <th className="px-4 py-3 font-medium"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -197,6 +198,14 @@ export default async function AgentDashboardPage() {
                       <Badge tone={customer.user.isActive ? "green" : "red"}>
                         {customer.user.isActive ? "Active" : "Inactive"}
                       </Badge>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <Link
+                        href={`/agent/customers/${customer.id}`}
+                        className="text-sm font-medium text-emerald-700 hover:underline"
+                      >
+                        View
+                      </Link>
                     </td>
                   </tr>
                 ))}
