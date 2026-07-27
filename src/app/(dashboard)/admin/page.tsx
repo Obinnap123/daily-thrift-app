@@ -19,6 +19,7 @@ import {
 } from "@/server/repositories/contribution.repository";
 import { listPlansReadyForPayout } from "@/server/repositories/contribution-plan.repository";
 import { listRecentAgentAssignmentLogs } from "@/server/repositories/agent.repository";
+import { listCustomerProfiles } from "@/server/repositories/customer.repository";
 import { today, weekRange, monthRange } from "@/lib/date";
 import { DashboardHeader } from "@/components/layout/DashboardHeader";
 import { DashboardNav } from "@/components/layout/DashboardNav";
@@ -26,6 +27,7 @@ import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { MonthlyTrackerGrid } from "@/components/dashboard/MonthlyTrackerGrid";
 import { PayoutRow } from "@/components/forms/PayoutRow";
+import { QuickPayButton } from "@/components/forms/QuickPayButton";
 import { format } from "date-fns";
 import Link from "next/link";
 
@@ -53,6 +55,7 @@ export default async function AdminDashboardPage() {
     recentTransactions,
     recentAgentActivity,
     trackingSeries,
+    allCustomers,
   ] = await Promise.all([
     prisma.user.count({ where: { role: "CUSTOMER" } }),
     prisma.user.count({ where: { role: "CUSTOMER", isActive: true } }),
@@ -65,7 +68,15 @@ export default async function AdminDashboardPage() {
     listRecentContributionsSystemWide(8),
     listRecentAgentAssignmentLogs(8),
     getDailyTrackingSeries(), // system-wide, last 31 days
+    listCustomerProfiles(), // every customer — Quick Pay modal's searchable dropdown
   ]);
+
+  const quickPayCustomers = allCustomers.map((customer) => ({
+    id: customer.id,
+    name: customer.user.name,
+    phone: customer.user.phone,
+    customerCode: customer.customerCode,
+  }));
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -86,6 +97,7 @@ export default async function AdminDashboardPage() {
         <Card>
           <h2 className="mb-3 text-base font-semibold text-gray-900">Quick actions</h2>
           <div className="flex flex-wrap gap-3">
+            <QuickPayButton customers={quickPayCustomers} isAdmin label="Quick Pay" />
             <Link
               href="/admin/agents/new"
               className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"

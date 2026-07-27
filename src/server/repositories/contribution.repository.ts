@@ -13,17 +13,67 @@ import { prisma } from "@/lib/prisma";
 import { toDateOnly, today, addDaysToDate } from "@/lib/date";
 import { format } from "date-fns";
 
-/** A single day's Contribution row for a given plan, if one was recorded. */
+/**
+ * The NORMAL (non-override) Contribution row for a given plan + day, if one
+ * was recorded — this is what the duplicate-payment check queries. Uses
+ * findFirst rather than findUnique: since the Quick Pay migration, the
+ * database's uniqueness guarantee for (contributionPlanId, collectionDate)
+ * is a PARTIAL unique index scoped to isOverride = false rows (see
+ * migration 20260727130000), so Prisma no longer exposes this pair as a
+ * plain compound unique key — but filtering isOverride: false here means
+ * at most one such row can ever exist per plan+day regardless.
+ */
 export async function findContributionForPlanAndDate(
   contributionPlanId: string,
   date: Date
 ) {
-  return prisma.contribution.findUnique({
+  return prisma.contribution.findFirst({
     where: {
-      contributionPlanId_collectionDate: {
-        contributionPlanId,
-        collectionDate: toDateOnly(date),
-      },
+      contributionPlanId,
+      collectionDate: toDateOnly(date),
+      isOverride: false,
+    },
+  });
+}
+
+/**
+ * ALL Contribution rows (normal and Admin-approved overrides) for a given
+ * plan + day — used by the Quick Pay override flow to show an Admin what
+ * already exists before they confirm an override.
+ */
+export async function listContributionsForPlanAndDate(contributionPlanId: string, date: Date) {
+  return prisma.contribution.findMany({
+    where: { contributionPlanId, collectionDate: toDateOnly(date) },
+    orderBy: { createdAt: "asc" },
+  });
+}
+
+/**
+ * Full payment history for a customer ACROSS every savings cycle they've
+ * ever had (not just their current plan) — the "digital passbook" / Payment
+ * History data source for the Customer Tracking Dashboard. Newest first.
+ */
+export async function listContributionsForCustomer(customerProfileId: string) {
+  return prisma.contribution.findMany({
+    where: { customerProfileId },
+    include: {
+      collectedBy: { select: { id: true, name: true } },
+      overriddenBy: { select: { id: true, name: true } },
+      contributionPlan: { select: { id: true, dailyAmount: true, startDate: true, status: true } },
+    },
+    orderBy: [{ collectionDate: "desc" }, { createdAt: "desc" }],
+  });
+}
+
+/** Look up a single Contribution by its printed receipt number — for the printable receipt page. */
+export async function findContributionByReceiptNumber(receiptNumber: string) {
+  return prisma.contribution.findUnique({
+    where: { receiptNumber },
+    include: {
+      customerProfile: { include: { user: { select: { name: true, phone: true } } } },
+      collectedBy: { select: { id: true, name: true } },
+      overriddenBy: { select: { id: true, name: true } },
+      contributionPlan: { select: { id: true, dailyAmount: true } },
     },
   });
 }

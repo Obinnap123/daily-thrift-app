@@ -52,3 +52,38 @@ export const recordContributionSchema = z
   });
 
 export type RecordContributionInput = z.infer<typeof recordContributionSchema>;
+
+/**
+ * "Quick Pay" — record a COLLECTED payment for a customer from the modal
+ * available on both the Admin and Agent dashboards (and, once built, the
+ * Customer Tracking page). Always records status = COLLECTED (Quick Pay is
+ * not used to mark a day as missed — that stays on the existing Today's
+ * Collections screen via recordContributionSchema above).
+ *
+ * paymentDate: present in the schema so an Admin CAN backdate/override a
+ * payment date; recordContribution() enforces server-side that only an
+ * Admin's request may actually use a date other than today() — an Agent
+ * request that includes any paymentDate is silently pinned back to
+ * today() by the service, never trusted from the client.
+ *
+ * isOverride / overrideReason: only ever honored when the caller is an
+ * Admin (re-checked server-side in the service) — this is what allows an
+ * Admin to record an approved same-day duplicate payment. `overrideReason`
+ * is required whenever `isOverride` is true.
+ */
+export const quickPaySchema = z
+  .object({
+    customerProfileId: z.string().min(1, "Select a customer"),
+    amount: decimalAmount,
+    paymentMethod: z.enum(["CASH", "BANK_TRANSFER"]),
+    paymentDate: z.coerce.date({ message: "Select a valid payment date" }).optional(),
+    note: z.string().trim().max(300, "Note is too long").optional().or(z.literal("")),
+    isOverride: z.boolean().optional().default(false),
+    overrideReason: z.string().trim().max(300, "Reason is too long").optional().or(z.literal("")),
+  })
+  .refine((data) => !data.isOverride || !!data.overrideReason, {
+    message: "Enter a reason for overriding the duplicate-payment check",
+    path: ["overrideReason"],
+  });
+
+export type QuickPayInput = z.infer<typeof quickPaySchema>;

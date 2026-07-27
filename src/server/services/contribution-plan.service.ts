@@ -32,12 +32,29 @@ export interface PlanProgress {
   isReadyToComplete: boolean;
 }
 
-/** Derive progress numbers for a plan from its own Contribution rows. */
+/**
+ * Derive progress numbers for a plan from its own Contribution rows.
+ *
+ * `daysPaid` counts DISTINCT calendar days with at least one COLLECTED
+ * row, not the raw count of COLLECTED rows — this matters since the Quick
+ * Pay migration, because an Admin-approved override can add a SECOND
+ * COLLECTED row for a day that was already paid (e.g. catching up a missed
+ * day with an extra same-day payment). Without this distinction, an
+ * override would incorrectly inflate "days paid" by counting one calendar
+ * day twice. `totalSaved`, by contrast, IS the sum of every COLLECTED
+ * row's amount (including override rows) — the customer's savings balance
+ * must reflect every naira actually collected, override or not.
+ */
 export function computePlanProgress(
   plan: { durationDays: number },
-  contributions: { status: "COLLECTED" | "MISSED"; amount: unknown }[]
+  contributions: { status: "COLLECTED" | "MISSED"; amount: unknown; collectionDate: Date }[]
 ): PlanProgress {
-  const daysPaid = contributions.filter((c) => c.status === "COLLECTED").length;
+  const collectedDayKeys = new Set(
+    contributions
+      .filter((c) => c.status === "COLLECTED")
+      .map((c) => c.collectionDate.toISOString().slice(0, 10))
+  );
+  const daysPaid = collectedDayKeys.size;
   const daysMissed = contributions.filter((c) => c.status === "MISSED").length;
   const daysRemaining = Math.max(0, plan.durationDays - daysPaid);
   const totalSaved = contributions
@@ -102,7 +119,7 @@ export async function createContributionPlan(
 export async function refreshPlanCompletionStatus(contributionPlanId: string): Promise<void> {
   const plan = await prisma.contributionPlan.findUnique({
     where: { id: contributionPlanId },
-    include: { contributions: { select: { status: true, amount: true } } },
+    include: { contributions: { select: { status: true, amount: true, collectionDate: true } } },
   });
   if (!plan || plan.status !== "ACTIVE") return;
 

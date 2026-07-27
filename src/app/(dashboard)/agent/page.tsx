@@ -24,6 +24,7 @@ import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { MonthlyTrackerGrid } from "@/components/dashboard/MonthlyTrackerGrid";
 import { RecordContributionForm } from "@/components/forms/RecordContributionForm";
+import { QuickPayButton } from "@/components/forms/QuickPayButton";
 import Link from "next/link";
 
 const AGENT_NAV_LINKS = [
@@ -57,22 +58,39 @@ export default async function AgentDashboardPage() {
 
   const activeCustomerCount = myCustomers.filter((c) => c.user.isActive).length;
 
-  // Quick Pay: every customer with an ACTIVE plan who hasn't had today's
-  // outcome recorded yet — same underlying data as /agent/collections, just
-  // surfaced directly on the dashboard so an agent doesn't have to navigate
-  // away to record the common case in one click.
+  // Quick Pay (inline widget): every customer with an ACTIVE plan who
+  // hasn't had today's outcome recorded yet — same underlying data as
+  // /agent/collections, just surfaced directly on the dashboard so an
+  // agent doesn't have to navigate away to record the common case in one
+  // click.
   const notYetRecordedToday = activePlansToday.filter((plan) => !plan.contributions[0]);
+
+  // Quick Pay (modal): the searchable customer dropdown covers EVERY one
+  // of this agent's customers, not just those not-yet-recorded-today — the
+  // modal is the general-purpose entry point (any customer, any time,
+  // including an Admin-approved same-day override), distinct from the
+  // inline widget above which only covers the common "hasn't paid yet
+  // today" case.
+  const quickPayCustomers = myCustomers.map((customer) => ({
+    id: customer.id,
+    name: customer.user.name,
+    phone: customer.user.phone,
+    customerCode: customer.customerCode,
+  }));
 
   return (
     <div className="flex min-h-screen flex-col">
       <DashboardHeader title="Agent Dashboard" />
       <DashboardNav links={AGENT_NAV_LINKS} />
       <main className="flex-1 space-y-6 p-4 sm:p-6">
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900">Daily Collection Summary</h2>
-          <p className="text-sm text-gray-500">
-            Your collection activity and totals for {today().toLocaleDateString()}.
-          </p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Daily Collection Summary</h2>
+            <p className="text-sm text-gray-500">
+              Your collection activity and totals for {today().toLocaleDateString()}.
+            </p>
+          </div>
+          <QuickPayButton customers={quickPayCustomers} isAdmin={false} label="Quick Pay" />
         </div>
 
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">

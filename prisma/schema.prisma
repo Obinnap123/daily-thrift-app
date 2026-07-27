@@ -63,6 +63,15 @@ enum PayoutMethod {
   BANK_TRANSFER
 }
 
+/// How a daily Contribution payment was physically received. Deliberately a
+/// SEPARATE enum from PayoutMethod (even though the values are identical)
+/// so the already-shipped Payout feature's type is never touched by
+/// changes to the Contribution/Quick-Pay module.
+enum ContributionPaymentMethod {
+  CASH
+  BANK_TRANSFER
+}
+
 /// Review state of an agent's End-of-Day cash reconciliation report.
 enum ReconciliationStatus {
   SUBMITTED // Agent has submitted; awaiting Admin review.
@@ -138,6 +147,10 @@ model User {
 
   /// Present only when role = ADMIN. Payouts this admin approved.
   payoutsApproved Payout[] @relation("PayoutApprovedBy")
+
+  /// Present only when role = ADMIN. Contribution rows where this admin
+  /// authorized a same-day duplicate-payment override.
+  contributionOverridesApproved Contribution[] @relation("ContributionOverriddenBy")
 
   @@index([role])
   @@map("users")
@@ -320,11 +333,45 @@ model Contribution {
   /// hand at visit").
   note String?
 
+  /// How this payment was physically received. Defaults to CASH for rows
+  /// created before this column existed (backfilled) and for MISSED rows
+  /// where the field is meaningless but still needs a value.
+  paymentMethod ContributionPaymentMethod @default(CASH)
+
+  /// System-generated, human-friendly receipt reference (e.g. "CR-000123"),
+  /// drawn from the `contribution_receipt_seq` Postgres sequence — see
+  /// lib/receipt-number.ts#generateContributionReceiptNumber. Null for
+  /// MISSED rows (nothing was collected, so no receipt is issued).
+  /// @unique + nullable: Postgres allows multiple NULLs under a unique
+  /// constraint, so many MISSED rows can coexist with no receipt number.
+  receiptNumber String? @unique
+
+  /// True when this row is an ADMIN-approved same-day duplicate payment for
+  /// a customer who already has a normal (non-override) Contribution row
+  /// for this plan+day. Normal rows can never carry isOverride = true —
+  /// only the Quick Pay "override" path sets it, and only for Admins.
+  isOverride Boolean @default(false)
+
+  /// The Admin who authorized the override. Null on every normal row.
+  overriddenById String?
+  overriddenBy   User?   @relation("ContributionOverriddenBy", fields: [overriddenById], references: [id], onDelete: SetNull)
+
+  /// Why the override was necessary (e.g. "Customer paid twice — catching
+  /// up a missed day"). Required by app-level validation whenever
+  /// isOverride = true, even though the column itself is optional.
+  overrideReason String?
+
   createdAt DateTime @default(now())
 
-  /// One collection decision per plan per day — prevents accidentally
-  /// double-logging (or double-missing) the same customer on the same day.
-  @@unique([contributionPlanId, collectionDate])
+  /// Historical note: prior to the Quick Pay migration this was a plain
+  /// `@@unique([contributionPlanId, collectionDate])`, which made it
+  /// impossible for an Admin to ever record an approved same-day duplicate.
+  /// It is now enforced instead as a PARTIAL unique index — scoped to
+  /// isOverride = false rows only — via raw SQL in the migration file
+  /// (Prisma's schema syntax cannot express a partial index), so this
+  /// `@@index` here is a plain (non-unique) lookup index only; the actual
+  /// uniqueness guarantee lives in the database via that partial index.
+  @@index([contributionPlanId, collectionDate])
   @@index([customerProfileId])
   @@index([collectedById, collectionDate])
   @@index([collectionDate])
