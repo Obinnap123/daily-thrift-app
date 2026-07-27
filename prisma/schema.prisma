@@ -1,0 +1,62 @@
+// ============================================================================
+// Davchuks Daily Thrift Management System — Prisma Schema
+// ============================================================================
+// This file defines the database structure. It grows incrementally as we
+// build each feature (Step 1 only defines authentication/user models).
+//
+// Docs: https://pris.ly/d/prisma-schema
+// ============================================================================
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+// NOTE: Prisma 7 no longer reads the connection URL from this file.
+// The URL is configured in `prisma.config.ts` (for CLI commands like
+// migrate/studio) and passed to the driver adapter in `src/lib/prisma.ts`
+// (for the running application). See https://pris.ly/d/config-datasource
+datasource db {
+  provider = "postgresql"
+}
+
+// ----------------------------------------------------------------------------
+// Enums
+// ----------------------------------------------------------------------------
+
+/// Application-wide user roles. Determines which dashboard and permissions
+/// a logged-in user gets.
+enum Role {
+  ADMIN // Full system access: manage agents, customers, reports, settings
+  AGENT // Field collector: registers customers, records daily contributions
+  CUSTOMER // Thrift contributor: views own savings, requests withdrawals
+}
+
+// ----------------------------------------------------------------------------
+// Models
+// ----------------------------------------------------------------------------
+
+/// Core user account used for authentication (NextAuth Credentials provider).
+/// Every person who can log in — Admin, Agent, or Customer — has one of these.
+/// (A Customer who cannot log in yet, e.g. registered by an Agent without an
+/// account, will instead be represented later by a separate "Customer" model
+/// in Step 4 that optionally links back to a User.)
+model User {
+  id            String    @id @default(cuid())
+  name          String
+  email         String    @unique
+  /// Hashed with bcryptjs — never store plain text passwords.
+  passwordHash  String
+  role          Role      @default(CUSTOMER)
+  phone         String?
+  /// Soft-disable a login without deleting the record (audit trail friendly).
+  isActive      Boolean   @default(true)
+  /// Timestamp of the last successful login, useful for admin oversight.
+  lastLoginAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([role])
+  @@map("users")
+}
