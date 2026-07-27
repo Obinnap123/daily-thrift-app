@@ -1,31 +1,57 @@
 /**
  * Auth.js (NextAuth v5) configuration.
  * ----------------------------------------------------------------------------
- * We use the Credentials provider (email + password) because Davchuks Daily
- * Thrift is an internal business system, not a public consumer app — there's
- * no need for social/OAuth logins. Sessions are signed JWTs (not stored in
- * the database), which keeps things fast and avoids needing the NextAuth
+ * We use the Credentials provider because Davchuks Daily Thrift is an
+ * internal business system, not a public consumer app — there's no need for
+ * social/OAuth logins. Sessions are signed JWTs (not stored in the
+ * database), which keeps things fast and avoids needing the NextAuth
  * Account/Session/VerificationToken tables.
+ *
+ * Login identifier rule:
+ * - ADMIN and AGENT accounts always have an email and log in with it.
+ * - CUSTOMER accounts log in with their PHONE NUMBER (many customers don't
+ *   have an email address in this business context).
+ * We accept a single "identifier" field from the login form and decide
+ * whether to look it up as an email or a phone number based on its shape
+ * (see resolveIdentifierLookup below) — this keeps the login page to one
+ * simple field instead of a confusing "are you staff or a customer?" toggle.
  *
  * Security notes:
  * - Passwords are verified against bcrypt hashes (see lib/password.ts).
  * - Inactive accounts (isActive = false) cannot log in.
- * - We never leak whether an email exists vs. a wrong password was supplied —
- *   both return the same generic "Invalid email or password" error.
+ * - We never leak whether an account exists vs. a wrong password was
+ *   supplied — both return the same generic "Invalid credentials" error.
  */
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { prisma } from "@/lib/prisma";
 import { verifyPassword } from "@/lib/password";
 import { loginSchema } from "@/validations/auth";
+import { normalizePhone } from "@/lib/phone";
 import { authConfig } from "@/lib/auth.config";
+
+/**
+ * Decide how to look up the entered identifier: as an email (contains "@")
+ * or as a phone number (normalized to digits/leading "+" otherwise).
+ * Returned as a discriminated union rather than a Prisma type directly, to
+ * avoid coupling this file to Prisma's generated internal type paths.
+ */
+function resolveIdentifierLookup(
+  identifier: string
+): { email: string } | { phone: string } {
+  const trimmed = identifier.trim();
+  if (trimmed.includes("@")) {
+    return { email: trimmed.toLowerCase() };
+  }
+  return { phone: normalizePhone(trimmed) };
+}
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
   providers: [
     Credentials({
       credentials: {
-        email: { label: "Email", type: "email" },
+        identifier: { label: "Email or Phone Number", type: "text" },
         password: { label: "Password", type: "password" },
       },
       async authorize(rawCredentials) {
@@ -33,9 +59,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const parsed = loginSchema.safeParse(rawCredentials);
         if (!parsed.success) return null;
 
-        const { email, password } = parsed.data;
+        const { identifier, password } = parsed.data;
 
-        const user = await prisma.user.findUnique({ where: { email } });
+        const user = await prisma.user.findUnique({
+          where: resolveIdentifierLookup(identifier),
+        });
         if (!user) return null;
 
         // Block disabled accounts (e.g. an agent who was let go).

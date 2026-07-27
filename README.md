@@ -5,9 +5,10 @@
 - **Goal**: Manage a daily contribution/savings (thrift/Ajo-style) business —
   tracking customers, daily contributions collected by field agents, savings
   balances, and withdrawals, with full audit visibility for the admin.
-- **Status**: Step 1 complete (project setup, auth, role-based dashboards).
-  Business features (registration, contributions, withdrawals, reports,
-  receipts, audit logs, notifications, backups) are being built incrementally
+- **Status**: Step 2 complete (Authentication System: roles, customer
+  registration, agent assignment/rotation, role-scoped dashboards).
+  Business features (contribution recording, savings balance, withdrawals,
+  reports, receipts, notifications, backups) are being built incrementally
   in later steps.
 
 ## Tech Stack
@@ -24,62 +25,91 @@
 - **Production**: _not yet deployed_ — see "Deployment" note below.
 
 ## Data Architecture
-- **Data Models** (so far): `User` (id, name, email, passwordHash, role,
-  phone, isActive, lastLoginAt, timestamps). `Role` enum: `ADMIN`, `AGENT`,
-  `CUSTOMER`.
+- **`User`**: id, name, email (optional, unique — used by Admin/Agent login),
+  phone (optional, unique — used by Customer login), passwordHash, role
+  (`ADMIN` | `AGENT` | `CUSTOMER`), isActive, lastLoginAt, timestamps.
+- **`CustomerProfile`**: one-to-one with a `CUSTOMER`-role `User`. Holds
+  idNumber (unique) and assignedAgentId (FK to an `AGENT`-role `User`).
+- **`AgentAssignmentLog`**: immutable audit trail. One row per assignment —
+  the initial assignment at registration, and every later rotation. Stores
+  previousAgentId (nullable), newAgentId, changedById, optional note,
+  createdAt.
 - **Storage**: PostgreSQL, accessed via Prisma Client (driver-adapter based,
   required by Prisma 7).
 - **Auth model**: Stateless JWT sessions (no NextAuth DB session tables).
-  Passwords hashed with bcrypt (12 salt rounds). No public self-registration —
-  accounts are created by an Admin (seed script creates the first Admin).
+  Passwords hashed with bcrypt (12 salt rounds). No public self-registration
+  for any role — Admins are bootstrapped via the seed script; Agents are
+  created by an Admin; Customers are registered by an Admin or their Agent.
+- **Dual-identifier login**: a single "identifier" field on the login form.
+  Server-side, the value is checked for an "@" — if present, treated as an
+  email (Admin/Agent); otherwise normalized as a phone number (Customer).
 
 ## Folder Structure
 ```
 src/
   app/
-    (auth)/login/            # Login page + client-side form
-    (dashboard)/admin/       # Admin dashboard (placeholder for Step 1)
-    (dashboard)/agent/       # Agent dashboard (placeholder for Step 1)
-    (dashboard)/customer/    # Customer dashboard (placeholder for Step 1)
-    api/auth/[...nextauth]/  # NextAuth API route handler
+    (auth)/login/                     # Login page + client-side form (identifier + password)
+    (dashboard)/admin/                # Admin: overview, agents, customers (list/new/detail)
+    (dashboard)/agent/                # Agent: own customers list, register-customer
+    (dashboard)/customer/             # Customer: own profile + assigned agent
+    api/auth/[...nextauth]/           # NextAuth API route handler
   components/
-    ui/                      # Reusable primitives (Button, Input, Card)
-    layout/                  # Shared layout pieces (DashboardHeader)
-    providers/               # Client-side context providers (SessionProvider)
-    forms/                   # (reserved for future form components)
+    ui/                               # Button, Input, Select, Badge, Card
+    layout/                           # DashboardHeader, DashboardNav
+    providers/                        # SessionProvider
+    forms/                            # RegisterCustomerForm, ReassignAgentForm
   server/
-    services/                # (reserved for business logic, Step 2+)
-    repositories/            # (reserved for data-access layer, Step 2+)
+    repositories/                     # Prisma queries (agent, customer, user)
+    services/                         # Business logic + transactions (agent, customer)
+    actions/                          # Server Actions — auth boundary (agent, customer)
   lib/
-    prisma.ts                # Prisma Client singleton (driver-adapter based)
-    auth.ts                  # Full NextAuth config (Node runtime, has DB access)
-    auth.config.ts           # Edge-safe NextAuth config (used by middleware)
-    password.ts              # bcrypt hash/verify helpers
-    utils.ts                 # Small shared helpers (cn() class merge)
+    prisma.ts                         # Prisma Client singleton (driver-adapter based)
+    auth.ts                           # Full NextAuth config (Node runtime, DB access)
+    auth.config.ts                    # Edge-safe NextAuth config (used by middleware)
+    session.ts                        # getCurrentUser(), requireRole() — server-side authz
+    password.ts                       # bcrypt hash/verify helpers
+    phone.ts                          # normalizePhone()
+    action-result.ts                  # ActionResult<T> discriminated union + ok()/fail()
+    utils.ts                          # cn() class merge helper
   validations/
-    auth.ts                  # Zod schemas for login/register
+    auth.ts                           # loginSchema, createAgentSchema
+    customer.ts                       # registerCustomerSchema, reassignAgentSchema
   types/
-    next-auth.d.ts           # Session/JWT type augmentation (id, role)
-  middleware.ts               # Route protection (auth + role-based access)
+    next-auth.d.ts                    # Session/JWT type augmentation (id, role)
+  middleware.ts                        # Route protection (auth + role-based section access)
 prisma/
-  schema.prisma               # Database schema
-  seed.ts                     # Creates the first Admin account
-  migrations/                 # Prisma migration history
+  schema.prisma                        # User, CustomerProfile, AgentAssignmentLog
+  seed.ts                              # Creates the first Admin account
+  migrations/                          # Prisma migration history
 ```
 
 ## User Guide (current state)
-1. An Admin account is bootstrapped via the seed script (see "Database setup"
+1. An Admin account is bootstrapped via the seed script (see "Database Setup"
    below) — there is no public sign-up page by design.
-2. Visit `/login` and sign in with the Admin's email/password.
-3. On success you're redirected to `/admin`, `/agent`, or `/customer`
-   depending on the account's role. Middleware blocks cross-role access
-   (e.g. a Customer cannot browse to `/admin`).
-4. Use "Sign out" in the dashboard header to end the session.
+2. Admin logs in at `/login` with **email** + password → lands on `/admin`.
+   From there:
+   - `/admin/agents` → list agents; `/admin/agents/new` → create an Agent
+     (email + password; phone optional).
+   - `/admin/customers` → list **all** customers (across every agent);
+     `/admin/customers/new` → register a customer, choosing any active agent.
+   - `/admin/customers/[id]` → view a customer's profile, **rotate their
+     assigned agent** (with an optional note), and see the full assignment
+     history (audit trail).
+3. Agent logs in at `/login` with **email** + password → lands on `/agent`,
+   which lists **only their own** assigned customers. "+ Register Customer"
+   registers a new customer that is automatically assigned to themselves —
+   there is no way for an Agent to pick a different agent, even by tampering
+   with the request (enforced server-side, see Security Notes).
+4. Customer logs in at `/login` with **phone number** + password → lands on
+   `/customer`, showing their own profile and their currently assigned agent's
+   name/contact. Savings balance / transaction history will appear here in a
+   later step.
+5. "Sign out" in the dashboard header ends the session for any role.
 
 ## Database Setup (local/sandbox development)
 ```bash
-# 1. Apply the schema to PostgreSQL
-npm run db:migrate
+# 1. Apply migrations to PostgreSQL
+npx prisma migrate deploy
 
 # 2. Seed the first Admin account (reads from env vars, with safe fallbacks)
 SEED_ADMIN_EMAIL="admin@davchuks.com" \
@@ -90,36 +120,43 @@ npm run db:seed
 
 ## Development
 ```bash
-npm run build            # Build the production bundle
-pm2 start ecosystem.config.cjs   # Start via PM2 (see Standard Startup Workflow)
+npm run build                    # Build the production bundle
+pm2 restart webapp --update-env  # Restart via PM2 after a new build
 pm2 logs webapp --nostream       # Check logs without blocking
 ```
 
-## Features Implemented (Step 1)
+## Features Implemented (Step 1 + Step 2)
 - ✅ Next.js + TypeScript + Tailwind CSS project scaffolded
-- ✅ PostgreSQL database + Prisma ORM configured (Prisma 7 driver-adapter pattern)
-- ✅ `User` model with role enum (ADMIN / AGENT / CUSTOMER)
-- ✅ NextAuth v5 Credentials authentication (bcrypt password hashing, JWT sessions)
-- ✅ Role-based route protection middleware
-- ✅ Login page with client-side + server-side (Zod) validation
-- ✅ Placeholder dashboards for all three roles
-- ✅ Reusable UI primitives (Button, Input, Card)
-- ✅ Seed script for bootstrapping the first Admin account
-- ✅ Verified end-to-end: build succeeds, login succeeds/fails correctly,
-  sessions carry custom fields, role-based access enforced, tested both on
-  localhost and through the public sandbox URL.
+- ✅ PostgreSQL + Prisma ORM (Prisma 7 driver-adapter pattern)
+- ✅ `User`, `CustomerProfile`, `AgentAssignmentLog` models + migration
+- ✅ NextAuth v5 Credentials auth — dual identifier (email for Admin/Agent,
+  phone for Customer), bcrypt hashing, JWT sessions
+- ✅ Role-based route middleware (coarse section blocking) **+**
+  `requireRole()` server-side re-verification (fine-grained, per page/action)
+- ✅ Admin: Agents list/create, Customers list/create/detail, agent
+  reassignment (rotation) with full audit history
+- ✅ Agent: own-customers-only dashboard, self-scoped customer registration
+  (server-enforced — the client can never pick a different agent)
+- ✅ Customer: own-profile dashboard (name, phone, ID number, status,
+  assigned agent) — scoped strictly to the logged-in user's own record
+- ✅ Repository / Service / Server-Action three-layer architecture with
+  transactional writes (`registerCustomer`, `reassignCustomerAgent`)
+- ✅ Zod validation shared client+server; friendly `ActionResult` error
+  shape (no raw exceptions reaching the UI); loading states on all forms
+- ✅ Verified end-to-end: `npm run build` succeeds; PM2 restarted on new
+  build; Admin login verified via curl (session cookie + `/admin` 200 +
+  `/agent` correctly redirected by middleware).
 
 ## Features Not Yet Implemented (upcoming steps)
-1. Customer Registration (full customer profile + KYC fields)
-2. Daily Contribution Recording (agent records collections per customer)
-3. Savings Balance calculation & display
-4. Withdrawals (request + approval workflow)
-5. Reports (collection summaries, agent performance, customer statements)
-6. Receipt Generation (PDF/printable receipts)
-7. User Management (Admin creates/edits/disables Agents & Customers)
-8. Audit Logs (who did what, when)
-9. Notifications (email/SMS reminders, alerts)
-10. Backup and Restore
+1. Daily Contribution Recording (agent records collections per customer)
+2. Savings Balance calculation & display
+3. Withdrawals (request + approval workflow)
+4. Reports (collection summaries, agent performance, customer statements)
+5. Receipt Generation (PDF/printable receipts)
+6. Full User Management (edit/disable Agents & Customers, password resets)
+7. Audit Logs (system-wide — beyond the agent-assignment log already built)
+8. Notifications (email/SMS reminders, alerts)
+9. Backup and Restore
 
 ## Deployment Notes
 ⚠️ This stack (Next.js + Prisma + PostgreSQL + NextAuth, Node.js runtime) is
@@ -131,10 +168,21 @@ a VPS, or Vercel + a managed PostgreSQL provider (Neon, Supabase, RDS, etc.).
 ## Security Notes
 - Passwords are hashed with bcrypt (12 salt rounds), never stored in plain text.
 - `.env` (real secrets) is git-ignored; `.env.example` documents required vars.
-- Sessions use signed JWTs (`AUTH_SECRET`), 8-hour expiry.
-- Login errors are generic ("Invalid email or password") to avoid leaking
-  whether an email exists in the system.
+- Sessions use signed JWTs (`AUTH_SECRET`).
+- Login errors are generic ("Invalid credentials...") to avoid leaking
+  whether an identifier exists in the system.
 - Disabled accounts (`isActive = false`) cannot log in even with correct credentials.
-- `trustHost: true` is required because the app runs behind a reverse proxy
-  (this sandbox, and most production hosts) — Auth.js infers the real host
-  from forwarded headers rather than relying on a hardcoded `NEXTAUTH_URL`.
+- `trustHost: true` is required because the app runs behind a reverse proxy.
+- **Defense-in-depth authorization** (three independent layers, never trusting
+  the client alone):
+  1. Middleware blocks a request from a wrong-role dashboard *URL section*.
+  2. `requireRole()` re-verifies the caller's role from the signed JWT inside
+     every Server Component page and every Server Action.
+  3. Data-access queries are scoped at the database level (e.g.
+     `listCustomerProfiles({ agentId })`), and the Agent's own id is taken
+     **only** from the verified session — `registerCustomerAction` forcibly
+     overrides any `assignedAgentId` the client form sends when the caller
+     is an Agent, so an Agent cannot register a customer under anyone else.
+- Nullable-unique `email`/`phone` columns are safe in Postgres: a unique
+  constraint permits multiple `NULL`s, so many phoneless Agents and many
+  emailless Customers can coexist.

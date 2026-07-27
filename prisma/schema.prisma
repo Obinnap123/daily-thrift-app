@@ -2,7 +2,10 @@
 // Davchuks Daily Thrift Management System — Prisma Schema
 // ============================================================================
 // This file defines the database structure. It grows incrementally as we
-// build each feature (Step 1 only defines authentication/user models).
+// build each feature.
+//
+// Step 1: User model + Role enum (authentication foundation)
+// Step 2: Customer profiles, agent assignment, and rotation audit trail
 //
 // Docs: https://pris.ly/d/prisma-schema
 // ============================================================================
@@ -38,25 +41,119 @@ enum Role {
 
 /// Core user account used for authentication (NextAuth Credentials provider).
 /// Every person who can log in — Admin, Agent, or Customer — has one of these.
-/// (A Customer who cannot log in yet, e.g. registered by an Agent without an
-/// account, will instead be represented later by a separate "Customer" model
-/// in Step 4 that optionally links back to a User.)
+///
+/// Login rule (enforced in application code, see lib/auth.ts):
+///   - ADMIN and AGENT log in with EMAIL + password.
+///   - CUSTOMER logs in with PHONE NUMBER + password (customers frequently
+///     don't have an email address in this business context).
 model User {
-  id            String    @id @default(cuid())
-  name          String
-  email         String    @unique
+  id           String    @id @default(cuid())
+  name         String
+  /// Required for ADMIN/AGENT (login credential). Optional for CUSTOMER.
+  /// Nullable + unique: Postgres allows multiple NULLs under a unique
+  /// constraint, so many customers can have no email simultaneously.
+  email        String?   @unique
+  /// Required for CUSTOMER (login credential). Optional for ADMIN/AGENT
+  /// (kept as contact info only for staff — see login rule above).
+  /// Stored in normalized form (digits + optional leading "+"), see
+  /// lib/phone.ts#normalizePhone.
+  phone        String?   @unique
   /// Hashed with bcryptjs — never store plain text passwords.
-  passwordHash  String
-  role          Role      @default(CUSTOMER)
-  phone         String?
+  passwordHash String
+  role         Role      @default(CUSTOMER)
   /// Soft-disable a login without deleting the record (audit trail friendly).
-  isActive      Boolean   @default(true)
+  isActive     Boolean   @default(true)
   /// Timestamp of the last successful login, useful for admin oversight.
-  lastLoginAt   DateTime?
+  lastLoginAt  DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  /// Present only when role = CUSTOMER. Holds thrift-specific fields
+  /// (ID number, assigned agent) that don't apply to Admin/Agent accounts.
+  customerProfile CustomerProfile?
+
+  /// Present only when role = AGENT. The list of customers currently
+  /// assigned to this agent for collection/management.
+  managedCustomers CustomerProfile[] @relation("AgentCustomers")
+
+  /// Assignment-log rows where this user was the PREVIOUS agent on a
+  /// customer (before a rotation).
+  assignmentLogsAsPreviousAgent AgentAssignmentLog[] @relation("AssignmentPreviousAgent")
+
+  /// Assignment-log rows where this user became the NEW agent on a
+  /// customer (after a rotation, or on initial registration).
+  assignmentLogsAsNewAgent AgentAssignmentLog[] @relation("AssignmentNewAgent")
+
+  /// Assignment-log rows this user personally performed (the Admin/Agent
+  /// who clicked "register" or "reassign").
+  assignmentLogsPerformed AgentAssignmentLog[] @relation("AssignmentChangedBy")
+
   @@index([role])
   @@map("users")
+}
+
+/// Thrift-specific profile data for a CUSTOMER user. Kept as a separate
+/// table (rather than extra nullable columns on User) because these fields
+/// are meaningless for ADMIN/AGENT accounts — this keeps the User table
+/// clean and makes the "a customer must have these fields" rule explicit
+/// at the schema level.
+model CustomerProfile {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// National ID / voter's card / whatever identification the business
+  /// uses to verify a customer. Must be unique — used to prevent the same
+  /// person from being registered twice under different accounts.
+  idNumber String @unique
+
+  /// The agent currently responsible for collecting this customer's daily
+  /// contributions. Required — every customer must always have an agent.
+  /// Changing this value (agent rotation) is only done through the
+  /// reassignment service, which also writes an AgentAssignmentLog entry —
+  /// never update this column directly.
+  assignedAgentId String
+  assignedAgent   User   @relation("AgentCustomers", fields: [assignedAgentId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Full history of agent assignments/rotations for this customer,
+  /// newest first (see AgentAssignmentLog).
+  assignmentLogs AgentAssignmentLog[]
+
+  @@index([assignedAgentId])
+  @@map("customer_profiles")
+}
+
+/// Immutable audit trail of every agent assignment change for a customer —
+/// including the very first assignment at registration time (previousAgentId
+/// is null in that case). This is what makes agent "rotation" auditable
+/// instead of just silently overwriting CustomerProfile.assignedAgentId.
+model AgentAssignmentLog {
+  id String @id @default(cuid())
+
+  customerProfileId String
+  customerProfile   CustomerProfile @relation(fields: [customerProfileId], references: [id], onDelete: Cascade)
+
+  /// Null on the very first assignment (customer registration).
+  previousAgentId String?
+  previousAgent   User?   @relation("AssignmentPreviousAgent", fields: [previousAgentId], references: [id], onDelete: SetNull)
+
+  newAgentId String
+  newAgent   User   @relation("AssignmentNewAgent", fields: [newAgentId], references: [id], onDelete: Restrict)
+
+  /// The Admin (or self-registering Agent) who performed this change.
+  changedById String
+  changedBy   User   @relation("AssignmentChangedBy", fields: [changedById], references: [id], onDelete: Restrict)
+
+  /// Optional free-text reason ("Agent left the company", "Route
+  /// rebalancing", etc.) shown in the audit trail.
+  note String?
+
+  createdAt DateTime @default(now())
+
+  @@index([customerProfileId])
+  @@map("agent_assignment_logs")
 }

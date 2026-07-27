@@ -7,6 +7,10 @@
  * validation, then calls NextAuth's `signIn("credentials", ...)`. We use
  * `redirect: false` so we can show inline errors instead of a full page
  * navigation to a generic NextAuth error page.
+ *
+ * A single "identifier" field accepts either an email (Admin/Agent) or a
+ * phone number (Customer) — see lib/auth.ts for how the server decides
+ * which lookup to perform.
  */
 import { useState } from "react";
 import { useForm } from "react-hook-form";
@@ -40,8 +44,8 @@ export function LoginForm() {
     });
 
     if (result?.error) {
-      // Intentionally generic — do not reveal whether the email exists.
-      setFormError("Invalid email or password.");
+      // Intentionally generic — do not reveal whether the account exists.
+      setFormError("Invalid credentials. Please check and try again.");
       return;
     }
 
@@ -54,12 +58,12 @@ export function LoginForm() {
     <Card>
       <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4" noValidate>
         <Input
-          label="Email address"
-          type="email"
-          autoComplete="email"
-          placeholder="you@example.com"
-          error={errors.email?.message}
-          {...register("email")}
+          label="Email or Phone Number"
+          type="text"
+          autoComplete="username"
+          placeholder="you@example.com or 08031234567"
+          error={errors.identifier?.message}
+          {...register("identifier")}
         />
         <Input
           label="Password"
@@ -71,7 +75,7 @@ export function LoginForm() {
         />
 
         {formError && (
-          <p role="alert" className="text-sm text-red-600">
+          <p role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
             {formError}
           </p>
         )}
@@ -79,6 +83,11 @@ export function LoginForm() {
         <Button type="submit" isLoading={isSubmitting} className="mt-2 w-full">
           Sign in
         </Button>
+
+        <p className="text-center text-xs text-gray-500">
+          Admins &amp; Agents sign in with their email. Customers sign in
+          with their registered phone number.
+        </p>
       </form>
     </Card>
   );
