@@ -55,3 +55,44 @@ export const reassignAgentSchema = z.object({
 });
 
 export type ReassignAgentInput = z.infer<typeof reassignAgentSchema>;
+
+/**
+ * Customer edit form (Admin or the customer's own Agent).
+ * ----------------------------------------------------------------------------
+ * Deliberately does NOT include `assignedAgentId` — agent assignment is
+ * changed only through the dedicated, audited `reassignAgentSchema` /
+ * ReassignAgentForm flow above, never as a side effect of a routine profile
+ * edit. Also excludes password (not a routine-edit concern) and
+ * `customerCode` (system-generated once, immutable thereafter).
+ */
+export const editCustomerSchema = z.object({
+  customerProfileId: z.string().min(1),
+  fullName: z.string().trim().min(2, "Full name must be at least 2 characters"),
+  phone: z
+    .string()
+    .trim()
+    .regex(/^[0-9+\s-]{7,15}$/, "Enter a valid phone number"),
+  idNumber: z
+    .string()
+    .trim()
+    .min(4, "ID number must be at least 4 characters")
+    .max(50, "ID number is too long"),
+});
+
+export type EditCustomerInput = z.infer<typeof editCustomerSchema>;
+
+/**
+ * Bulk "assign customers to an agent" form (Admin only) — used from the
+ * Agent detail page to move one or more existing customers onto a
+ * specific agent in one action. Distinct from `reassignAgentSchema`
+ * (which rotates ONE customer from its current detail page) — this is the
+ * agent-centric equivalent: picking several customers and moving them
+ * onto THIS agent at once.
+ */
+export const bulkAssignCustomersSchema = z.object({
+  agentId: z.string().min(1),
+  customerProfileIds: z.array(z.string().min(1)).min(1, "Select at least one customer"),
+  note: z.string().trim().max(500, "Note is too long").optional().or(z.literal("")),
+});
+
+export type BulkAssignCustomersInput = z.infer<typeof bulkAssignCustomersSchema>;

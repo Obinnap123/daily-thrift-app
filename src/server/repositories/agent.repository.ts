@@ -8,6 +8,7 @@
  * filter everywhere.
  */
 import { prisma } from "@/lib/prisma";
+import { toSkipTake, DEFAULT_PAGE_SIZE } from "@/lib/pagination";
 
 /** Minimal shape needed to populate an "assign to agent" dropdown. */
 export interface AgentOption {
@@ -25,26 +26,86 @@ export async function listActiveAgents(): Promise<AgentOption[]> {
   });
 }
 
-/** List ALL agents (including disabled ones) for the Admin's agent management page. */
-export async function listAllAgents() {
-  return prisma.user.findMany({
-    where: { role: "AGENT" },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      phone: true,
-      isActive: true,
-      createdAt: true,
-      _count: { select: { managedCustomers: true } },
-    },
-    orderBy: { createdAt: "desc" },
-  });
+export interface ListAgentsOptions {
+  /** Free-text search across name, email, and phone (case-insensitive). */
+  search?: string;
+  /** Filter to only active or only inactive agents. Omit for "all". */
+  status?: "active" | "inactive";
+  page?: number;
+  pageSize?: number;
+}
+
+/**
+ * List agents for the Admin's management page, with optional search,
+ * status filter, and pagination. Search/filter happen at the database
+ * level (never "fetch everything then filter in memory") so this scales
+ * as the agent list grows.
+ */
+export async function listAgentsPaginated(options: ListAgentsOptions = {}) {
+  const { search, status, page = 1, pageSize = DEFAULT_PAGE_SIZE } = options;
+
+  // Deliberately typed as `Parameters<...>[0]["where"]` rather than
+  // importing Prisma's generated internal `UserWhereInput` type — this
+  // keeps the repository decoupled from the generated client's internal
+  // type layout (see Step 2 decision on resolveIdentifierLookup for the
+  // same reasoning), while still getting full autocomplete/type-checking
+  // from the actual `findMany` call below.
+  type UserFindManyArgs = Parameters<typeof prisma.user.findMany>[0];
+  const where: NonNullable<UserFindManyArgs>["where"] = {
+    role: "AGENT",
+    ...(status === "active" ? { isActive: true } : {}),
+    ...(status === "inactive" ? { isActive: false } : {}),
+    ...(search
+      ? {
+          OR: [
+            { name: { contains: search, mode: "insensitive" } },
+            { email: { contains: search, mode: "insensitive" } },
+            { phone: { contains: search } },
+          ],
+        }
+      : {}),
+  };
+
+  const [agents, totalCount] = await Promise.all([
+    prisma.user.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        isActive: true,
+        createdAt: true,
+        _count: { select: { managedCustomers: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      ...toSkipTake(page, pageSize),
+    }),
+    prisma.user.count({ where }),
+  ]);
+
+  return { agents, totalCount };
 }
 
 /** Fetch a single agent by id (used to validate reassignment targets, etc.). */
 export async function findAgentById(agentId: string) {
   return prisma.user.findFirst({
     where: { id: agentId, role: "AGENT" },
+  });
+}
+
+/**
+ * Fetch a single agent with the fields needed for the Edit Agent page and
+ * the Agent detail / "assign customers" page.
+ */
+export async function findAgentDetailById(agentId: string) {
+  return prisma.user.findFirst({
+    where: { id: agentId, role: "AGENT" },
+    include: {
+      managedCustomers: {
+        include: { user: { select: { id: true, name: true, phone: true, isActive: true } } },
+        orderBy: { createdAt: "desc" },
+      },
+    },
   });
 }

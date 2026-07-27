@@ -6,6 +6,7 @@
 //
 // Step 1: User model + Role enum (authentication foundation)
 // Step 2: Customer profiles, agent assignment, and rotation audit trail
+// Step 3: Agent & Customer Management (unique customer codes, passport photos)
 //
 // Docs: https://pris.ly/d/prisma-schema
 // ============================================================================
@@ -107,6 +108,19 @@ model CustomerProfile {
   /// uses to verify a customer. Must be unique — used to prevent the same
   /// person from being registered twice under different accounts.
   idNumber String @unique
+
+  /// System-generated, human-friendly unique customer code (e.g.
+  /// "DDT-000123"), assigned once at registration and never changed.
+  /// Backed by a dedicated Postgres sequence (`customer_code_seq`, created
+  /// in the migration SQL) so concurrent registrations can never collide —
+  /// far safer than reading MAX(id)+1 in application code under load.
+  /// Used on receipts, search, and as the customer-facing reference number.
+  customerCode String @unique
+
+  /// URL/path of the customer's uploaded passport photograph (stored via
+  /// Cloudflare R2 in production; nullable because a customer may be
+  /// registered before their photo is captured/uploaded).
+  passportPhotoUrl String?
 
   /// The agent currently responsible for collecting this customer's daily
   /// contributions. Required — every customer must always have an agent.

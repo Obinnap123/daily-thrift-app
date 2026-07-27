@@ -16,6 +16,7 @@ import { reassignCustomerAgentAction } from "@/server/actions/customer.actions";
 import { Select } from "@/components/ui/Select";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
+import { useToast } from "@/components/providers/ToastProvider";
 import type { AgentOption } from "@/server/repositories/agent.repository";
 
 interface ReassignAgentFormProps {
@@ -31,6 +32,7 @@ export function ReassignAgentForm({
   onSuccess,
 }: ReassignAgentFormProps) {
   const router = useRouter();
+  const { showToast } = useToast();
   const [formError, setFormError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -53,6 +55,7 @@ export function ReassignAgentForm({
 
     if (!result.success) {
       setFormError(result.message);
+      showToast({ type: "error", message: result.message });
       if (result.fieldErrors) {
         for (const [field, message] of Object.entries(result.fieldErrors)) {
           setError(field as keyof ReassignAgentInput, { message });
@@ -62,6 +65,7 @@ export function ReassignAgentForm({
     }
 
     setSuccessMessage("Agent reassigned successfully.");
+    showToast({ type: "success", message: "Agent reassigned successfully." });
     reset({ customerProfileId, newAgentId: "", note: "" });
     router.refresh();
     onSuccess?.();

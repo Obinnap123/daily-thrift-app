@@ -17,9 +17,11 @@ import { createAgentSchema, type CreateAgentInput } from "@/validations/auth";
 import { createAgentAction } from "@/server/actions/agent.actions";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
+import { useToast } from "@/components/providers/ToastProvider";
 
 export function CreateAgentForm() {
   const router = useRouter();
+  const { showToast } = useToast();
   const [formError, setFormError] = useState<string | null>(null);
 
   const {
@@ -38,6 +40,7 @@ export function CreateAgentForm() {
 
     if (!result.success) {
       setFormError(result.message);
+      showToast({ type: "error", message: result.message });
       // Surface field-specific duplicate errors (e.g. "email already exists")
       // directly under the relevant input, same as client-side validation.
       if (result.fieldErrors) {
@@ -48,6 +51,7 @@ export function CreateAgentForm() {
       return;
     }
 
+    showToast({ type: "success", message: "Agent created successfully." });
     router.push("/admin/agents");
     router.refresh();
   }

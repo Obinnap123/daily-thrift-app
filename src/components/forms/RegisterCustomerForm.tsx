@@ -23,6 +23,7 @@ import { registerCustomerAction } from "@/server/actions/customer.actions";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
+import { useToast } from "@/components/providers/ToastProvider";
 import type { AgentOption } from "@/server/repositories/agent.repository";
 
 interface RegisterCustomerFormProps {
@@ -44,6 +45,7 @@ export function RegisterCustomerForm({
   currentAgentId,
 }: RegisterCustomerFormProps) {
   const router = useRouter();
+  const { showToast } = useToast();
   const [formError, setFormError] = useState<string | null>(null);
 
   const {
@@ -65,6 +67,7 @@ export function RegisterCustomerForm({
 
     if (!result.success) {
       setFormError(result.message);
+      showToast({ type: "error", message: result.message });
       if (result.fieldErrors) {
         for (const [field, message] of Object.entries(result.fieldErrors)) {
           setError(field as keyof RegisterCustomerInput, { message });
@@ -73,6 +76,10 @@ export function RegisterCustomerForm({
       return;
     }
 
+    showToast({
+      type: "success",
+      message: `Customer registered successfully (Code: ${result.data.customerCode}).`,
+    });
     router.push(redirectTo);
     router.refresh();
   }

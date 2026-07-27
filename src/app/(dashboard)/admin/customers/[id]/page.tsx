@@ -1,7 +1,9 @@
 /**
  * Admin > Customer detail page.
- * Shows the customer's profile, their full agent-assignment history (audit
- * trail), and a form to rotate them to a different agent.
+ * Shows the customer's profile (incl. customer code + passport photo), an
+ * Edit form, the passport-photo upload/replace control, their full
+ * agent-assignment history (audit trail), and a form to rotate them to a
+ * different agent.
  */
 import { notFound } from "next/navigation";
 import { requireRole } from "@/lib/session";
@@ -12,6 +14,8 @@ import { DashboardNav } from "@/components/layout/DashboardNav";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { ReassignAgentForm } from "@/components/forms/ReassignAgentForm";
+import { EditCustomerForm } from "@/components/forms/EditCustomerForm";
+import { PassportPhotoUpload } from "@/components/forms/PassportPhotoUpload";
 import { format } from "date-fns";
 
 const ADMIN_NAV_LINKS = [
@@ -43,35 +47,59 @@ export default async function AdminCustomerDetailPage({
       <DashboardHeader title="Admin Dashboard" />
       <DashboardNav links={ADMIN_NAV_LINKS} />
       <main className="flex-1 space-y-6 p-4 sm:p-6">
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900">{customer.user.name}</h2>
-          <p className="text-sm text-gray-500">Customer profile & agent assignment</p>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">{customer.user.name}</h2>
+            <p className="text-sm text-gray-500">
+              Customer code: <span className="font-mono">{customer.customerCode}</span>
+            </p>
+          </div>
+          <Badge tone={customer.user.isActive ? "green" : "red"}>
+            {customer.user.isActive ? "Active" : "Inactive"}
+          </Badge>
         </div>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          {/* Profile details */}
+          {/* Profile details (read-only summary) */}
           <Card className="lg:col-span-1">
             <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-500">
               Profile
             </h3>
             <dl className="space-y-3 text-sm">
-              <Row label="Full name" value={customer.user.name} />
-              <Row label="Phone" value={customer.user.phone ?? "—"} />
+              <Row label="Customer code" value={customer.customerCode} />
               <Row label="ID number" value={customer.idNumber} />
-              <Row
-                label="Status"
-                value={
-                  <Badge tone={customer.user.isActive ? "green" : "red"}>
-                    {customer.user.isActive ? "Active" : "Inactive"}
-                  </Badge>
-                }
-              />
               <Row
                 label="Registered"
                 value={format(customer.createdAt, "dd MMM yyyy, h:mm a")}
               />
               <Row label="Current agent" value={customer.assignedAgent.name} />
             </dl>
+          </Card>
+
+          {/* Edit form */}
+          <Card className="lg:col-span-1">
+            <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-500">
+              Edit Customer
+            </h3>
+            <EditCustomerForm
+              customer={{
+                id: customer.id,
+                fullName: customer.user.name,
+                phone: customer.user.phone,
+                idNumber: customer.idNumber,
+              }}
+            />
+          </Card>
+
+          {/* Passport photo */}
+          <Card className="lg:col-span-1">
+            <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-500">
+              Passport Photo
+            </h3>
+            <PassportPhotoUpload
+              customerProfileId={customer.id}
+              currentPhotoUrl={customer.passportPhotoUrl}
+            />
           </Card>
 
           {/* Reassignment form */}
@@ -86,7 +114,7 @@ export default async function AdminCustomerDetailPage({
           </Card>
 
           {/* Assignment history / audit trail */}
-          <Card className="lg:col-span-1">
+          <Card className="lg:col-span-2">
             <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-500">
               Assignment History
             </h3>

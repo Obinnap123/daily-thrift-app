@@ -63,3 +63,30 @@ export const createAgentSchema = z
   });
 
 export type CreateAgentInput = z.infer<typeof createAgentSchema>;
+
+/**
+ * Agent edit form (Admin only). Same shape as creation, minus password —
+ * password changes are a separate, deliberate action (not bundled into a
+ * routine profile edit) and are out of scope until a later step.
+ */
+export const editAgentSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().trim().min(2, "Name must be at least 2 characters"),
+  email: z.string().trim().toLowerCase().email("Enter a valid email address"),
+  phone: z
+    .string()
+    .trim()
+    .regex(/^[0-9+\s-]{7,15}$/, "Enter a valid phone number")
+    .optional()
+    .or(z.literal("")),
+});
+
+export type EditAgentInput = z.infer<typeof editAgentSchema>;
+
+/** Activate/deactivate an Agent (Admin only). */
+export const setAgentActiveSchema = z.object({
+  id: z.string().min(1),
+  isActive: z.boolean(),
+});
+
+export type SetAgentActiveInput = z.infer<typeof setAgentActiveSchema>;

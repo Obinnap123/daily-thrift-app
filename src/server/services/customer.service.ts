@@ -15,14 +15,23 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { hashPassword } from "@/lib/password";
 import { normalizePhone } from "@/lib/phone";
+import { generateCustomerCode } from "@/lib/customer-code";
+import { savePassportPhoto, deletePassportPhoto, PhotoUploadError } from "@/lib/file-upload";
 import {
   registerCustomerSchema,
   reassignAgentSchema,
+  editCustomerSchema,
+  bulkAssignCustomersSchema,
   type RegisterCustomerInput,
   type ReassignAgentInput,
+  type EditCustomerInput,
+  type BulkAssignCustomersInput,
 } from "@/validations/customer";
 import { findUserByPhone } from "@/server/repositories/user.repository";
-import { findCustomerProfileByIdNumber } from "@/server/repositories/customer.repository";
+import {
+  findCustomerProfileByIdNumber,
+  findCustomerProfileWithUserId,
+} from "@/server/repositories/customer.repository";
 import { findAgentById } from "@/server/repositories/agent.repository";
 import { ok, fail, type ActionResult } from "@/lib/action-result";
 
@@ -36,7 +45,7 @@ import { ok, fail, type ActionResult } from "@/lib/action-result";
 export async function registerCustomer(
   input: RegisterCustomerInput,
   performedById: string
-): Promise<ActionResult<{ userId: string; customerProfileId: string }>> {
+): Promise<ActionResult<{ userId: string; customerProfileId: string; customerCode: string }>> {
   const parsed = registerCustomerSchema.safeParse(input);
   if (!parsed.success) {
     return fail("Please correct the highlighted fields.");
@@ -75,6 +84,12 @@ export async function registerCustomer(
 
   const passwordHash = await hashPassword(password);
 
+  // Draw the unique customer code from its dedicated Postgres sequence
+  // BEFORE the transaction — nextval() on a sequence is its own atomic
+  // operation and does not need to (and should not) be part of the
+  // customer-creation transaction below.
+  const customerCode = await generateCustomerCode();
+
   // Transaction: create the login account, the thrift profile, and the
   // very first assignment-log entry (previousAgentId = null) together. If
   // any step fails, everything rolls back — we never end up with a
@@ -94,6 +109,7 @@ export async function registerCustomer(
         userId: user.id,
         idNumber,
         assignedAgentId,
+        customerCode,
       },
     });
 
@@ -107,10 +123,171 @@ export async function registerCustomer(
       },
     });
 
-    return { userId: user.id, customerProfileId: customerProfile.id };
+    return { userId: user.id, customerProfileId: customerProfile.id, customerCode };
   });
 
   return ok(result);
+}
+
+/**
+ * Update a customer's editable profile fields (name, phone, ID number).
+ * Does NOT touch assignedAgentId (see editCustomerSchema comment) or
+ * passportPhotoUrl (handled separately by uploadCustomerPassportPhoto,
+ * since that's a file-upload concern, not a form-field concern).
+ */
+export async function updateCustomer(
+  input: EditCustomerInput
+): Promise<ActionResult<{ customerProfileId: string }>> {
+  const parsed = editCustomerSchema.safeParse(input);
+  if (!parsed.success) {
+    return fail("Please correct the highlighted fields.");
+  }
+
+  const { customerProfileId, fullName, phone, idNumber } = parsed.data;
+
+  const existing = await findCustomerProfileWithUserId(customerProfileId);
+  if (!existing) {
+    return fail("Customer not found.");
+  }
+
+  const normalizedPhone = normalizePhone(phone);
+
+  // Duplicate checks that EXCLUDE this customer's own current record —
+  // otherwise editing a customer without changing their phone/ID number
+  // would incorrectly flag "already registered" against themselves.
+  const existingByPhone = await findUserByPhone(normalizedPhone);
+  if (existingByPhone && existingByPhone.id !== existing.userId) {
+    return fail("Another customer is already registered with this phone number.", {
+      phone: "This phone number is already registered.",
+    });
+  }
+
+  if (idNumber !== existing.idNumber) {
+    const existingByIdNumber = await findCustomerProfileByIdNumber(idNumber);
+    if (existingByIdNumber && existingByIdNumber.id !== customerProfileId) {
+      return fail("Another customer is already registered with this ID number.", {
+        idNumber: "This ID number is already registered.",
+      });
+    }
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.user.update({
+      where: { id: existing.userId },
+      data: { name: fullName, phone: normalizedPhone },
+    });
+    await tx.customerProfile.update({
+      where: { id: customerProfileId },
+      data: { idNumber },
+    });
+  });
+
+  return ok({ customerProfileId });
+}
+
+/**
+ * Upload (or replace) a customer's passport photo.
+ * If the customer already had a photo, the old file is deleted after the
+ * new one is successfully saved and the database row is updated — so a
+ * failed upload never leaves the customer with no photo at all.
+ */
+export async function uploadCustomerPassportPhoto(
+  customerProfileId: string,
+  file: File
+): Promise<ActionResult<{ passportPhotoUrl: string }>> {
+  const existing = await prisma.customerProfile.findUnique({
+    where: { id: customerProfileId },
+    select: { id: true, passportPhotoUrl: true },
+  });
+  if (!existing) {
+    return fail("Customer not found.");
+  }
+
+  let newPhotoUrl: string;
+  try {
+    newPhotoUrl = await savePassportPhoto(file);
+  } catch (error) {
+    if (error instanceof PhotoUploadError) {
+      return fail(error.message);
+    }
+    throw error;
+  }
+
+  await prisma.customerProfile.update({
+    where: { id: customerProfileId },
+    data: { passportPhotoUrl: newPhotoUrl },
+  });
+
+  // Clean up the old file only after the new one is safely stored+saved.
+  await deletePassportPhoto(existing.passportPhotoUrl);
+
+  return ok({ passportPhotoUrl: newPhotoUrl });
+}
+
+/**
+ * Bulk-assign one or more existing customers to a given agent — the
+ * agent-centric equivalent of reassignCustomerAgent above (which rotates
+ * ONE customer from that customer's own detail page). Used from the Agent
+ * detail page's "Assign Customers" picker to move several customers onto
+ * this agent in a single action.
+ *
+ * Every customer moved gets its own AgentAssignmentLog row (same audit
+ * guarantee as single reassignment) — a bulk action must never be less
+ * auditable than doing the same thing one at a time.
+ */
+export async function bulkAssignCustomersToAgent(
+  input: BulkAssignCustomersInput,
+  performedById: string
+): Promise<ActionResult<{ assignedCount: number }>> {
+  const parsed = bulkAssignCustomersSchema.safeParse(input);
+  if (!parsed.success) {
+    return fail("Select at least one customer to assign.");
+  }
+
+  const { agentId, customerProfileIds, note } = parsed.data;
+
+  const agent = await findAgentById(agentId);
+  if (!agent) {
+    return fail("Agent not found.");
+  }
+  if (!agent.isActive) {
+    return fail("Cannot assign customers to an inactive agent.");
+  }
+
+  const customers = await prisma.customerProfile.findMany({
+    where: { id: { in: customerProfileIds } },
+    select: { id: true, assignedAgentId: true },
+  });
+  if (customers.length === 0) {
+    return fail("None of the selected customers could be found.");
+  }
+
+  // Skip any customer already assigned to this agent — nothing to log or
+  // change for them, and avoids a confusing "no-op reassignment" audit row.
+  const toReassign = customers.filter((customer) => customer.assignedAgentId !== agentId);
+  if (toReassign.length === 0) {
+    return fail("All selected customers are already assigned to this agent.");
+  }
+
+  await prisma.$transaction(async (tx) => {
+    for (const customer of toReassign) {
+      await tx.customerProfile.update({
+        where: { id: customer.id },
+        data: { assignedAgentId: agentId },
+      });
+      await tx.agentAssignmentLog.create({
+        data: {
+          customerProfileId: customer.id,
+          previousAgentId: customer.assignedAgentId,
+          newAgentId: agentId,
+          changedById: performedById,
+          note: note || "Bulk assignment",
+        },
+      });
+    }
+  });
+
+  return ok({ assignedCount: toReassign.length });
 }
 
 /**

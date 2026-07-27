@@ -8,6 +8,7 @@
  * would be easy to forget and leak data across agents.
  */
 import { prisma } from "@/lib/prisma";
+import { toSkipTake, DEFAULT_PAGE_SIZE } from "@/lib/pagination";
 
 /**
  * List customer profiles, optionally scoped to a single agent.
@@ -25,6 +26,70 @@ export async function listCustomerProfiles(options?: { agentId?: string }) {
     },
     orderBy: { createdAt: "desc" },
   });
+}
+
+export interface ListCustomersOptions {
+  /** Scope to a single agent's customers (Agent role). Omit for Admin (all). */
+  agentId?: string;
+  /** Free-text search across name, phone, ID number, and customer code. */
+  search?: string;
+  /** Filter to only active or only inactive customers. Omit for "all". */
+  status?: "active" | "inactive";
+  /** Filter to customers assigned to a specific agent (Admin filter dropdown). */
+  filterAgentId?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+/**
+ * List customer profiles for a management page, with optional search,
+ * status filter, agent filter, and pagination — all applied at the
+ * database level.
+ */
+export async function listCustomersPaginated(options: ListCustomersOptions = {}) {
+  const {
+    agentId,
+    search,
+    status,
+    filterAgentId,
+    page = 1,
+    pageSize = DEFAULT_PAGE_SIZE,
+  } = options;
+
+  type CustomerFindManyArgs = Parameters<typeof prisma.customerProfile.findMany>[0];
+  const where: NonNullable<CustomerFindManyArgs>["where"] = {
+    // Agent-scoping takes precedence: if both agentId (session scope) and
+    // filterAgentId (Admin UI filter) were somehow both set, agentId wins
+    // — an Agent's session scope must never be overridable by a query param.
+    assignedAgentId: agentId ?? filterAgentId ?? undefined,
+    ...(status === "active" ? { user: { isActive: true } } : {}),
+    ...(status === "inactive" ? { user: { isActive: false } } : {}),
+    ...(search
+      ? {
+          OR: [
+            { customerCode: { contains: search, mode: "insensitive" } },
+            { idNumber: { contains: search, mode: "insensitive" } },
+            { user: { name: { contains: search, mode: "insensitive" } } },
+            { user: { phone: { contains: search } } },
+          ],
+        }
+      : {}),
+  };
+
+  const [customers, totalCount] = await Promise.all([
+    prisma.customerProfile.findMany({
+      where,
+      include: {
+        user: { select: { id: true, name: true, phone: true, isActive: true, createdAt: true } },
+        assignedAgent: { select: { id: true, name: true, email: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      ...toSkipTake(page, pageSize),
+    }),
+    prisma.customerProfile.count({ where }),
+  ]);
+
+  return { customers, totalCount };
 }
 
 /**
@@ -63,4 +128,31 @@ export async function findCustomerProfileByUserId(userId: string) {
 /** Check whether an ID number is already registered (uniqueness pre-check). */
 export async function findCustomerProfileByIdNumber(idNumber: string) {
   return prisma.customerProfile.findUnique({ where: { idNumber } });
+}
+
+/** Fetch the raw underlying User id for a given CustomerProfile — used to
+ * validate phone-duplicate checks during edits (excluding the customer's
+ * own current record from the "already registered" check). */
+export async function findCustomerProfileWithUserId(customerProfileId: string) {
+  return prisma.customerProfile.findUnique({
+    where: { id: customerProfileId },
+    select: { id: true, userId: true, idNumber: true, assignedAgentId: true },
+  });
+}
+
+/**
+ * List active customers NOT currently assigned to the given agent — used
+ * to populate the "assign customers to this agent" multi-select on the
+ * Agent detail page (an agent obviously can't be assigned a customer
+ * that's already theirs).
+ */
+export async function listCustomersNotAssignedToAgent(agentId: string) {
+  return prisma.customerProfile.findMany({
+    where: { assignedAgentId: { not: agentId }, user: { isActive: true } },
+    include: {
+      user: { select: { id: true, name: true, phone: true } },
+      assignedAgent: { select: { id: true, name: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
 }
