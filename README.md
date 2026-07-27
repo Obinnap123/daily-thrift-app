@@ -71,12 +71,30 @@
 - **Dual-identifier login**: a single "identifier" field on the login form.
   Server-side, the value is checked for an "@" — if present, treated as an
   email (Admin/Agent); otherwise normalized as a phone number (Customer).
+- **Role-based login entry**: `/login` is a chooser page with three buttons
+  — Admin Login, Agent Login, Customer Login — each opening its own
+  dedicated page (`/login/admin`, `/login/agent`, `/login/customer`). All
+  three render the same shared `LoginForm`/`loginSchema`/`authorize()` code
+  path; the `role` prop only changes the identifier field's label,
+  placeholder, and hint text (Email for Admin/Agent, Phone Number for
+  Customer) — it has no effect on validation or authentication. A
+  `callbackUrl` set by `middleware.ts` (e.g. after an unauthenticated visit
+  to a protected route) is preserved through the chooser and the chosen
+  role page, so the user lands back on the originally requested page after
+  signing in.
+- **Password visibility toggle**: the password field on the login form uses
+  a `PasswordInput` component with an eye-icon button that toggles the
+  native input between masked (`type="password"`, the default) and visible
+  (`type="text"`) — a client-side-only display toggle, not a change to how
+  the password is stored, hashed, or transmitted.
 
 ## Folder Structure
 ```
 src/
   app/
-    (auth)/login/                     # Login page + client-side form (identifier + password)
+    (auth)/login/                     # /login chooser (Admin/Agent/Customer Login buttons)
+      admin/, agent/, customer/       #   + /login/admin, /login/agent, /login/customer,
+                                       #   each rendering the shared LoginForm with a role prop
     (dashboard)/admin/                # Admin: overview, agents, customers (incl. Customer
                                        #   Tracking Dashboard + Delete Registration on the
                                        #   detail page), payouts, reconciliations, reports
@@ -86,7 +104,7 @@ src/
     api/auth/[...nextauth]/           # NextAuth API route handler
     api/reports/export/               # GET route handler — PDF/Excel report download
   components/
-    ui/                               # Button, Input, Select, Badge, Card, Modal
+    ui/                               # Button, Input, PasswordInput, Select, Badge, Card, Modal
     layout/                           # DashboardHeader, DashboardNav
     providers/                        # SessionProvider, ToastProvider
     dashboard/                        # MonthlyTrackerGrid (31-Day Tracking, shared
@@ -142,8 +160,12 @@ prisma/
 ## User Guide (current state)
 1. An Admin account is bootstrapped via the seed script (see "Database Setup"
    below) — there is no public sign-up page by design.
-2. Admin logs in at `/login` with **email** + password → lands on `/admin`.
-   From there:
+2. Visiting `/login` shows a chooser with three buttons: **Admin Login**,
+   **Agent Login**, **Customer Login**. Each opens its own page
+   (`/login/admin`, `/login/agent`, `/login/customer`) with the same
+   password field (with a show/hide eye-icon toggle) but a field label/hint
+   suited to that role. Admin logs in at `/login/admin` with **email** +
+   password → lands on `/admin`. From there:
 
    **Agent Management** (`/admin/agents`):
    - Search agents by name/email/phone, filter by Active/Inactive, paginate
@@ -196,15 +218,16 @@ prisma/
        printable receipt links — see "Customer Tracking Dashboard" below for
        full details. The same panel (minus the Danger Zone) is available to
        an Agent for their own customers at `/agent/customers/[id]`.
-3. Agent logs in at `/login` with **email** + password → lands on `/agent`,
-   which lists **only their own** assigned customers. "+ Register Customer"
-   registers a new customer that is automatically assigned to themselves —
-   there is no way for an Agent to pick a different agent, even by tampering
-   with the request (enforced server-side, see Security Notes).
-4. Customer logs in at `/login` with **phone number** + password → lands on
-   `/customer`, showing their own profile, assigned agent, a **Savings
-   Progress** card (daily amount, paid days / target days, total saved,
-   projected maturity date, status), and their **Payout History**.
+3. Agent logs in at `/login/agent` with **email** + password → lands on
+   `/agent`, which lists **only their own** assigned customers. "+ Register
+   Customer" registers a new customer that is automatically assigned to
+   themselves — there is no way for an Agent to pick a different agent,
+   even by tampering with the request (enforced server-side, see Security
+   Notes).
+4. Customer logs in at `/login/customer` with **phone number** + password
+   → lands on `/customer`, showing their own profile, assigned agent, a
+   **Savings Progress** card (daily amount, paid days / target days, total
+   saved, projected maturity date, status), and their **Payout History**.
 5. "Sign out" in the dashboard header ends the session for any role.
 
 ### Agent Collection workflow (`/agent`, `/agent/collections`, `/agent/reconciliation`)
@@ -417,6 +440,20 @@ pm2 logs webapp --nostream       # Check logs without blocking
   modal (`DeleteCustomerButton`) before the delete fires, since there is no
   "undo"/reactivate path once deleted (unlike an Agent's Activate/Deactivate
   toggle).
+- ✅ **Role-based login chooser + password show/hide toggle** — `/login`
+  is now a chooser page with three buttons (Admin Login, Agent Login,
+  Customer Login), each opening its own dedicated page (`/login/admin`,
+  `/login/agent`, `/login/customer`). All three share one `LoginForm`
+  component and the existing `loginSchema`/`authorize()` code path — the
+  `role` prop only changes the identifier field's label/placeholder/hint
+  (Email vs. Phone Number), never validation or authentication logic.
+  `callbackUrl` set by `middleware.ts` is preserved through the chooser and
+  role page so a user bounced from a protected route lands back there
+  after signing in (verified via curl: `GET /admin` unauthenticated →
+  `307` → `location: /login?callbackUrl=%2Fadmin`). A new `PasswordInput`
+  component adds an eye-icon show/hide toggle to the password field
+  (defaults masked, click to reveal) — purely a client-side display
+  toggle, no change to how passwords are hashed/stored/transmitted.
 - ✅ Verified end-to-end: `npm run build` succeeds (22 routes, 0 errors),
   including the new `/agent/customers/[id]` dynamic route; `npx tsc --noEmit`
   clean; PM2 restarted on the new build; `/login` returns HTTP 200. The
@@ -427,7 +464,12 @@ pm2 logs webapp --nostream       # Check logs without blocking
   `CustomerProfile` rows confirmed gone afterward. Earlier: admin login
   verified via curl (session cookie), and **all 6 report types × 2 export
   formats (12 combinations)** smoke-tested with real HTTP requests
-  returning valid PDF/XLSX files.
+  returning valid PDF/XLSX files. Login redesign build: `npm run build`
+  succeeds (25 routes, up from 22, including the 3 new `/login/*` role
+  pages), `npx tsc --noEmit` clean, PM2 restarted; `/login`, `/login/admin`,
+  `/login/agent`, `/login/customer` all return HTTP 200 and render with
+  zero browser console errors (checked live via Playwright); a real
+  CSRF+credentials HTTP login as an Admin succeeded end-to-end.
 
 ## Features Not Yet Implemented (upcoming steps)
 1. Full User Management (edit/disable Agents & Customers, password resets
@@ -440,12 +482,14 @@ pm2 logs webapp --nostream       # Check logs without blocking
 5. Dashboard/report performance tuning once real data volume exists
    (current queries are correct but not yet indexed/tuned for scale)
 6. A full **browser click-through test** of the Customer Tracking
-   Dashboard and Delete Customer flow (logging in as Admin/Agent through
-   the actual UI and clicking through both features) has not yet been
-   performed — the Delete flow has been verified directly against the
-   service layer with real DB rows (see "Features Implemented"), and the
-   Dashboard has been verified via `next build`/`tsc`, but not via an
-   actual browser session.
+   Dashboard, Delete Customer flow, and the new login chooser/role pages
+   (logging in as Admin/Agent/Customer through the actual UI and visually
+   confirming each button opens the right page with visible, correctly
+   labeled fields) has not yet been performed — these have been verified
+   directly against the service layer with real DB rows, via `next
+   build`/`tsc`, compiled-bundle string checks, and zero-console-error
+   Playwright checks on a live URL, but not via an actual rendered browser
+   screenshot/session.
 
 ## Deployment Notes
 ⚠️ This stack (Next.js + Prisma + PostgreSQL + NextAuth, Node.js runtime) is
