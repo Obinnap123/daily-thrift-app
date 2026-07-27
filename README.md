@@ -201,6 +201,12 @@ prisma/
   this agent's own collection activity for the most recent 31 days — one
   cell per calendar day, colored emerald (collected), red (missed), or gray
   (no activity), with today's cell ring-highlighted.
+- `/agent` also shows a **Quick Pay** card — every customer with an ACTIVE
+  plan who has *not yet* had today's outcome recorded, each with the same
+  inline `RecordContributionForm` used on `/agent/collections`, so an agent
+  can record the common case in one click directly from the dashboard
+  without navigating to Today's Collections first. Reuses the existing
+  `recordContributionAction` unchanged (no new authorization surface).
 
 ### Admin oversight (`/admin`, `/admin/reconciliations`, `/admin/payouts`, `/admin/reports`)
 - `/admin` (**Admin Dashboard**): 10 metrics/feeds — total & active
@@ -209,6 +215,15 @@ prisma/
   (Recent Transactions, Recent Agent Activities) and Quick Actions shortcuts,
   plus a system-wide **31-Day Tracking** grid (same `MonthlyTrackerGrid`
   component as the Agent dashboard, but aggregated across every agent).
+- `/admin` also shows a **Quick Pay** card — the first 5 plans that are
+  `COMPLETED` and awaiting payout (same `listPlansReadyForPayout()` data as
+  `/admin/payouts`), each with the same inline `PayoutRow` →
+  `RecordPayoutForm` used on the full Payouts page, so an Admin can record a
+  payout in one click directly from the dashboard. A "+N more" link points
+  to the full `/admin/payouts` list when there are more than 5. Recording
+  payouts remains Admin-only (`recordPayoutAction` is deliberately not
+  callable by Agents — see `payout.actions.ts`), so this card is Admin-only
+  by construction, not by extra checks.
 - `/admin/reconciliations` (**Reconciliation review queue**): filterable by
   status (Submitted/Approved/Rejected/All); Admin approves or rejects each
   `SUBMITTED` row via `ReviewReconciliationButtons` (optional note on
@@ -268,7 +283,7 @@ pm2 logs webapp --nostream       # Check logs without blocking
   Route Handler can return a raw binary `Response` with a
   `Content-Disposition: attachment` header.
 
-## Features Implemented (Steps 1-4)
+## Features Implemented (Steps 1-4, plus 31-Day Tracking and Quick Pay follow-ups)
 - ✅ Next.js + TypeScript + Tailwind CSS project scaffolded
 - ✅ PostgreSQL + Prisma ORM (Prisma 7 driver-adapter pattern)
 - ✅ `User`, `CustomerProfile`, `AgentAssignmentLog` models + migration
@@ -309,6 +324,14 @@ pm2 logs webapp --nostream       # Check logs without blocking
   `/admin` (system-wide, every agent combined) and `/agent` (scoped to the
   signed-in agent only), backed by `getDailyTrackingSeries()` in the
   contribution repository
+- ✅ **Quick Pay** — one-click shortcuts surfaced directly on both
+  dashboards so staff don't have to leave the overview page to record the
+  common case: on `/agent`, an inline `RecordContributionForm` per
+  not-yet-recorded-today customer with an active plan; on `/admin`, an
+  inline `PayoutRow`/`RecordPayoutForm` per plan ready for payout (first 5,
+  with a link to the rest). Both reuse existing, already-authorized
+  actions (`recordContributionAction`, `recordPayoutAction`) — no new
+  Server Actions, validation, or authorization logic was introduced
 - ✅ **Reports module** — Daily/Weekly/Monthly/Agent/Customer/Payout History
   report types, all built from one shared `buildReportTable()` function so
   the on-screen table and the exported file are always identical; **PDF**

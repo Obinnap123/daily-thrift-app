@@ -25,6 +25,7 @@ import { DashboardNav } from "@/components/layout/DashboardNav";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { MonthlyTrackerGrid } from "@/components/dashboard/MonthlyTrackerGrid";
+import { PayoutRow } from "@/components/forms/PayoutRow";
 import { format } from "date-fns";
 import Link from "next/link";
 
@@ -104,6 +105,61 @@ export default async function AdminDashboardPage() {
               View Payouts ({dueForPayout.length} ready)
             </Link>
           </div>
+        </Card>
+
+        <Card>
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
+              Quick Pay — Ready for Payout ({dueForPayout.length})
+            </h3>
+            <Link
+              href="/admin/payouts"
+              className="text-sm font-medium text-emerald-700 hover:underline"
+            >
+              Full payouts list &rarr;
+            </Link>
+          </div>
+          <p className="mb-3 text-sm text-gray-500">
+            Record a completed savings cycle&apos;s payout in one click, right from here — no
+            need to open the Payouts page first. Only pay after the cash has been physically
+            handed over or the bank transfer has been completed outside this system.
+          </p>
+          {dueForPayout.length === 0 ? (
+            <p className="text-sm text-gray-500">No customers are currently ready for payout.</p>
+          ) : (
+            <ul className="divide-y divide-gray-100">
+              {dueForPayout.slice(0, 5).map((plan) => (
+                <li
+                  key={plan.id}
+                  className="flex flex-wrap items-center justify-between gap-3 py-2.5 text-sm"
+                >
+                  <div>
+                    <span className="font-medium text-gray-900">
+                      {plan.customerProfile.user.name}
+                    </span>
+                    <span className="ml-2 text-gray-500">
+                      ₦{Number(plan.dailyAmount).toLocaleString()}/day
+                    </span>
+                  </div>
+                  <PayoutRow
+                    contributionPlanId={plan.id}
+                    customerName={plan.customerProfile.user.name}
+                    dailyAmount={Number(plan.dailyAmount)}
+                    durationDays={plan.durationDays}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+          {dueForPayout.length > 5 && (
+            <p className="mt-3 text-xs text-gray-500">
+              +{dueForPayout.length - 5} more on the{" "}
+              <Link href="/admin/payouts" className="font-medium text-emerald-700 hover:underline">
+                full Payouts page
+              </Link>
+              .
+            </p>
+          )}
         </Card>
 
         <Card>

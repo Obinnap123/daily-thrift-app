@@ -10,11 +10,11 @@
  */
 import { requireRole } from "@/lib/session";
 import { listCustomerProfiles } from "@/server/repositories/customer.repository";
+import { listActivePlansForAgent } from "@/server/repositories/contribution-plan.repository";
 import {
   sumCollectedByAgent,
   countByAgentAndDate,
   sumOutstandingForAgent,
-  listCustomerIdsNotVisited,
   getDailyTrackingSeries,
 } from "@/server/repositories/contribution.repository";
 import { today, weekRange, monthRange } from "@/lib/date";
@@ -23,6 +23,7 @@ import { DashboardNav } from "@/components/layout/DashboardNav";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { MonthlyTrackerGrid } from "@/components/dashboard/MonthlyTrackerGrid";
+import { RecordContributionForm } from "@/components/forms/RecordContributionForm";
 import Link from "next/link";
 
 const AGENT_NAV_LINKS = [
@@ -41,7 +42,7 @@ export default async function AgentDashboardPage() {
     totalWeek,
     totalMonth,
     outstanding,
-    notVisited,
+    activePlansToday,
     trackingSeries,
   ] = await Promise.all([
     listCustomerProfiles({ agentId: user.id }),
@@ -50,11 +51,17 @@ export default async function AgentDashboardPage() {
     sumCollectedByAgent(user.id, weekRange()),
     sumCollectedByAgent(user.id, monthRange()),
     sumOutstandingForAgent(user.id),
-    listCustomerIdsNotVisited(user.id, today()),
+    listActivePlansForAgent(user.id, today()),
     getDailyTrackingSeries({ agentId: user.id }), // this agent's last 31 days
   ]);
 
   const activeCustomerCount = myCustomers.filter((c) => c.user.isActive).length;
+
+  // Quick Pay: every customer with an ACTIVE plan who hasn't had today's
+  // outcome recorded yet — same underlying data as /agent/collections, just
+  // surfaced directly on the dashboard so an agent doesn't have to navigate
+  // away to record the common case in one click.
+  const notYetRecordedToday = activePlansToday.filter((plan) => !plan.contributions[0]);
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -90,25 +97,42 @@ export default async function AgentDashboardPage() {
         <Card>
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
-              Not Visited Today ({notVisited.length})
+              Quick Pay — Not Yet Recorded Today ({notYetRecordedToday.length})
             </h3>
             <Link
               href="/agent/collections"
               className="text-sm font-medium text-emerald-700 hover:underline"
             >
-              Record collections &rarr;
+              Full collections list &rarr;
             </Link>
           </div>
-          {notVisited.length === 0 ? (
+          <p className="mb-3 text-sm text-gray-500">
+            Record today&apos;s outcome for a customer in one click, right from here — no need to
+            open Today&apos;s Collections first.
+          </p>
+          {notYetRecordedToday.length === 0 ? (
             <p className="text-sm text-gray-500">
-              Every assigned customer has been visited today. Great work!
+              Every customer with an active plan has been recorded for today. Great work!
             </p>
           ) : (
             <ul className="divide-y divide-gray-100">
-              {notVisited.map((customer) => (
-                <li key={customer.id} className="flex items-center justify-between py-2.5 text-sm">
-                  <span className="font-medium text-gray-900">{customer.user.name}</span>
-                  <span className="text-gray-500">{customer.user.phone ?? "—"}</span>
+              {notYetRecordedToday.map((plan) => (
+                <li
+                  key={plan.id}
+                  className="flex flex-wrap items-center justify-between gap-3 py-2.5 text-sm"
+                >
+                  <div>
+                    <span className="font-medium text-gray-900">
+                      {plan.customerProfile.user.name}
+                    </span>
+                    <span className="ml-2 text-gray-500">
+                      {plan.customerProfile.user.phone ?? "—"}
+                    </span>
+                  </div>
+                  <RecordContributionForm
+                    customerProfileId={plan.customerProfileId}
+                    defaultAmount={Number(plan.dailyAmount)}
+                  />
                 </li>
               ))}
             </ul>
