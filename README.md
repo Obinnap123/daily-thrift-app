@@ -13,7 +13,9 @@
   Customer Management). Note: an earlier design considered a "Withdrawal"
   module; this was replaced entirely by the **Payout module** below (savings
   are only released at maturity, via an admin-approved, receipted payout —
-  not an ad hoc withdrawal).
+  not an ad hoc withdrawal). Since then, a **Quick Pay** shortcut, a full
+  **Customer Tracking Dashboard**, and **Delete Customer Registration**
+  have also been added (see "Features Implemented" below).
 
 ## Tech Stack
 - **Framework**: Next.js 16 (App Router) + React 19 + TypeScript
@@ -75,23 +77,29 @@
 src/
   app/
     (auth)/login/                     # Login page + client-side form (identifier + password)
-    (dashboard)/admin/                # Admin: overview, agents, customers, payouts,
-                                       #   reconciliations, reports (list/new/detail pages)
-    (dashboard)/agent/                # Agent: own customers, collections, reconciliation
+    (dashboard)/admin/                # Admin: overview, agents, customers (incl. Customer
+                                       #   Tracking Dashboard + Delete Registration on the
+                                       #   detail page), payouts, reconciliations, reports
+    (dashboard)/agent/                # Agent: own customers (incl. own-scoped Customer
+                                       #   Tracking page), collections, reconciliation
     (dashboard)/customer/             # Customer: own profile + savings progress + payouts
     api/auth/[...nextauth]/           # NextAuth API route handler
     api/reports/export/               # GET route handler — PDF/Excel report download
   components/
-    ui/                               # Button, Input, Select, Badge, Card
+    ui/                               # Button, Input, Select, Badge, Card, Modal
     layout/                           # DashboardHeader, DashboardNav
-    providers/                        # SessionProvider
+    providers/                        # SessionProvider, ToastProvider
     dashboard/                        # MonthlyTrackerGrid (31-Day Tracking, shared
-                                       #   by Admin + Agent dashboards)
+                                       #   by Admin + Agent dashboards), ProgressBar,
+                                       #   PaymentHistoryTable, CustomerTrackingPanel
+                                       #   (shared Admin/Agent tracking dashboard)
     forms/                            # RegisterCustomerForm, ReassignAgentForm,
                                        #   CreatePlanForm, RecordContributionForm,
                                        #   SubmitReconciliationForm, ReviewReconciliationButtons,
                                        #   RecordPayoutForm, PayoutRow, PrintButton,
-                                       #   ReportFilterForm, ExportButtons
+                                       #   ReportFilterForm, ExportButtons,
+                                       #   QuickPayButton, QuickPayModal, CustomerSearchSelect,
+                                       #   DeleteCustomerButton
   server/
     repositories/                     # Prisma queries (agent, customer, user,
                                        #   contribution-plan, contribution, reconciliation, payout)
@@ -169,7 +177,25 @@ prisma/
      - **Rotate Agent**: reassign this one customer to a different agent
        (with an optional note) — separate from the bulk "Assign Customers"
        flow above; both write to the same audit trail.
+     - **Danger Zone — Delete Customer Registration**: permanently deletes
+       the customer's login account and profile. Only enabled when the
+       customer has **zero recorded contributions and zero payouts** —
+       otherwise the button is replaced with an explanation and the delete
+       is blocked (both in the UI and, independently, in the server
+       action/service — never trust the client alone). This is for
+       registrations created by mistake (wrong person, duplicate entry,
+       typo during setup); once a single payment has ever been recorded,
+       the record is permanent, mirroring the existing "deactivate, don't
+       delete" rule for Agents. Requires typing the customer's exact name
+       into a confirmation modal before the delete fires (stronger than a
+       plain confirm dialog, since this action has no undo).
      - See the full agent-assignment history (audit trail) at the bottom.
+     - **Customer Tracking Dashboard** (bottom of the page): savings
+       summary + progress bar, days paid/missed, a **Quick Record Payment**
+       button, and a combined digital passbook / payment history table with
+       printable receipt links — see "Customer Tracking Dashboard" below for
+       full details. The same panel (minus the Danger Zone) is available to
+       an Agent for their own customers at `/agent/customers/[id]`.
 3. Agent logs in at `/login` with **email** + password → lands on `/agent`,
    which lists **only their own** assigned customers. "+ Register Customer"
    registers a new customer that is automatically assigned to themselves —
@@ -207,6 +233,36 @@ prisma/
   can record the common case in one click directly from the dashboard
   without navigating to Today's Collections first. Reuses the existing
   `recordContributionAction` unchanged (no new authorization surface).
+- The "My Customers" table on `/agent` has a **View** link per customer to
+  `/agent/customers/[id]` — their scoped Customer Tracking page (see below).
+
+### Customer Tracking Dashboard (`/admin/customers/[id]`, `/agent/customers/[id]`)
+Clicking a customer from either the Admin customers list or an Agent's "My
+Customers" table opens a detail page with a full tracking view, built from
+one shared `CustomerTrackingPanel` component (parameterized by `isAdmin` so
+Admin gets the extra Edit/Rotate-Agent/Delete controls, while an Agent only
+ever sees their own assigned customers — re-verified server-side, `notFound()`
+if the customer isn't actually assigned to them). Sections:
+- **Customer profile** — name, customer code, ID number, registration date,
+  current agent (top of the Admin page; a dedicated card on the Agent page).
+- **Savings summary** — daily amount, total saved, days paid, days missed,
+  days remaining to the plan's target, or a "Start a savings plan" form if
+  the customer has no active plan yet.
+- **Progress bar** — a dependency-free horizontal bar (`ProgressBar`)
+  showing paid-days-so-far out of the plan's target duration.
+- **Payment tracking table / Digital passbook / Payment history** — these
+  three requested views are deliberately the *same* component
+  (`PaymentHistoryTable`): one chronological table of every `Contribution`
+  row (date, outcome badge — including an "Override" badge for admin
+  same-day duplicate payments, amount, method, recorded-by, and a link to
+  that payment's printable receipt).
+- **Quick Record Payment button** — opens the same `QuickPayModal` used on
+  the dashboards, pre-selected to this customer (`initialCustomerProfileId`),
+  so a payment can be recorded without leaving the tracking page; the table
+  and savings summary refresh immediately after (`router.refresh()`).
+- **Printable receipts** — every row in the payment table links to the
+  existing `/admin/contributions/[receiptNumber]` (or
+  `/agent/contributions/[receiptNumber]`) printable receipt page.
 
 ### Admin oversight (`/admin`, `/admin/reconciliations`, `/admin/payouts`, `/admin/reports`)
 - `/admin` (**Admin Dashboard**): 10 metrics/feeds — total & active
@@ -340,10 +396,38 @@ pm2 logs webapp --nostream       # Check logs without blocking
   export via `exceljs` (styled header row + optional totals row); download
   triggered by a Route Handler (`GET /api/reports/export`) so the browser
   handles the binary response natively via `Content-Disposition`
-- ✅ Verified end-to-end: `npm run build` succeeds (20 routes, 0 errors); PM2
-  restarted on the new build; admin login verified via curl (session
-  cookie), and **all 6 report types × 2 export formats (12 combinations)**
-  smoke-tested with real HTTP requests returning valid PDF/XLSX files.
+- ✅ **Customer Tracking Dashboard** — a shared `CustomerTrackingPanel`
+  rendered on both `/admin/customers/[id]` (Admin, all customers) and the
+  new `/agent/customers/[id]` (Agent, own customers only —
+  server-verified `assignedAgentId`, `notFound()` otherwise): customer
+  profile, savings summary, a dependency-free `ProgressBar`, days
+  paid/missed, a combined digital-passbook/payment-tracking/payment-history
+  table (`PaymentHistoryTable`, one component deliberately serving all
+  three requested views since they're the same chronological ledger of
+  `Contribution` rows), an embedded **Quick Record Payment** button
+  (pre-selected customer), and printable-receipt links on every row.
+- ✅ **Delete Customer Registration** (Admin-only, "Danger Zone" on the
+  customer detail page) — permanently deletes a customer's login account
+  and profile, but **only** when they have zero recorded `Contribution` and
+  `Payout` rows (`countCustomerFinancialActivity()` guard, enforced in the
+  service layer, never trusted from the client). Deleting the `User` row
+  cascades to `CustomerProfile` and `AgentAssignmentLog` via existing
+  `onDelete: Cascade` relations already in the schema — **no migration was
+  needed**. Requires typing the customer's exact name into a confirmation
+  modal (`DeleteCustomerButton`) before the delete fires, since there is no
+  "undo"/reactivate path once deleted (unlike an Agent's Activate/Deactivate
+  toggle).
+- ✅ Verified end-to-end: `npm run build` succeeds (22 routes, 0 errors),
+  including the new `/agent/customers/[id]` dynamic route; `npx tsc --noEmit`
+  clean; PM2 restarted on the new build; `/login` returns HTTP 200. The
+  Delete Customer flow was exercised directly against the service layer
+  with real DB rows: a customer **with** a recorded contribution was
+  correctly blocked with the guard message, and a customer **without** any
+  contributions/payouts was successfully deleted, with both the `User` and
+  `CustomerProfile` rows confirmed gone afterward. Earlier: admin login
+  verified via curl (session cookie), and **all 6 report types × 2 export
+  formats (12 combinations)** smoke-tested with real HTTP requests
+  returning valid PDF/XLSX files.
 
 ## Features Not Yet Implemented (upcoming steps)
 1. Full User Management (edit/disable Agents & Customers, password resets
@@ -353,12 +437,15 @@ pm2 logs webapp --nostream       # Check logs without blocking
 3. Notifications (email/SMS reminders, alerts — e.g. missed collection,
    plan matured and ready for payout)
 4. Backup and Restore
-5. Real end-to-end data: no plans/contributions/reconciliations/payouts
-   have been created through the UI yet in this environment — the new
-   tables are schema-verified and API-verified (built-report tested with 0
-   rows) but not yet populated with real business data
-6. Dashboard/report performance tuning once real data volume exists
+5. Dashboard/report performance tuning once real data volume exists
    (current queries are correct but not yet indexed/tuned for scale)
+6. A full **browser click-through test** of the Customer Tracking
+   Dashboard and Delete Customer flow (logging in as Admin/Agent through
+   the actual UI and clicking through both features) has not yet been
+   performed — the Delete flow has been verified directly against the
+   service layer with real DB rows (see "Features Implemented"), and the
+   Dashboard has been verified via `next build`/`tsc`, but not via an
+   actual browser session.
 
 ## Deployment Notes
 ⚠️ This stack (Next.js + Prisma + PostgreSQL + NextAuth, Node.js runtime) is
@@ -385,6 +472,17 @@ a VPS, or Vercel + a managed PostgreSQL provider (Neon, Supabase, RDS, etc.).
      **only** from the verified session — `registerCustomerAction` forcibly
      overrides any `assignedAgentId` the client form sends when the caller
      is an Agent, so an Agent cannot register a customer under anyone else.
+     The same pattern protects `/agent/customers/[id]`: the session's own
+     `user.id` is compared against the customer's `assignedAgentId`
+     server-side, returning `notFound()` on mismatch — an Agent can never
+     view another agent's customer by guessing/editing the URL.
+- **Irreversible-action safeguards**: `deleteCustomer()` re-checks the
+  zero-financial-activity guard server-side regardless of what the UI shows
+  (`canDelete` is computed for display only, never trusted as the actual
+  authorization), and `deleteCustomerAction()` is Admin-only. The client UI
+  additionally requires typing the customer's exact name before the delete
+  request is even sent, as a stronger confirmation than a plain `confirm()`
+  dialog, given there is no "undo" once a registration is deleted.
 - Nullable-unique `email`/`phone` columns are safe in Postgres: a unique
   constraint permits multiple `NULL`s, so many phoneless Agents and many
   emailless Customers can coexist.
