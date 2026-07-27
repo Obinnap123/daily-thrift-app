@@ -29,7 +29,7 @@ export default async function Home() {
         Davchuks Daily Thrift Management System
       </h1>
       <p className="max-w-md text-gray-600">
-        Manage daily contributions, savings balances, and withdrawals — built
+        Manage daily contributions, savings progress, and manual payouts — built
         for admins, agents, and customers.
       </p>
       <Link

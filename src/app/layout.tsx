@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Davchuks Daily Thrift Management System",
   description:
-    "Manage daily thrift contributions, savings, and withdrawals for Davchuks Daily Thrift.",
+    "Manage daily thrift contributions, savings progress, and manual payouts for Davchuks Daily Thrift.",
 };
 
 export default function RootLayout({

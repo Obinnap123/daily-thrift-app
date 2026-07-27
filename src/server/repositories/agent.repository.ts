@@ -87,6 +87,27 @@ export async function listAgentsPaginated(options: ListAgentsOptions = {}) {
   return { agents, totalCount };
 }
 
+/**
+ * Most recent agent-assignment changes system-wide (new registrations +
+ * rotations) — the data source for the Admin Dashboard's "Recent Agent
+ * Activities" feed. Contribution/reconciliation activity is agent-driven
+ * too, but assignment changes are the one agent-centric event that isn't
+ * already covered by "Recent Transactions", so this is what fills that
+ * feed without duplicating the transactions list.
+ */
+export async function listRecentAgentAssignmentLogs(limit = 10) {
+  return prisma.agentAssignmentLog.findMany({
+    orderBy: { createdAt: "desc" },
+    take: limit,
+    include: {
+      customerProfile: { include: { user: { select: { name: true } } } },
+      previousAgent: { select: { name: true } },
+      newAgent: { select: { name: true } },
+      changedBy: { select: { name: true } },
+    },
+  });
+}
+
 /** Fetch a single agent by id (used to validate reassignment targets, etc.). */
 export async function findAgentById(agentId: string) {
   return prisma.user.findFirst({

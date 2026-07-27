@@ -16,12 +16,18 @@ import { Badge } from "@/components/ui/Badge";
 import { ReassignAgentForm } from "@/components/forms/ReassignAgentForm";
 import { EditCustomerForm } from "@/components/forms/EditCustomerForm";
 import { PassportPhotoUpload } from "@/components/forms/PassportPhotoUpload";
+import { CreatePlanForm } from "@/components/forms/CreatePlanForm";
+import { getActivePlanWithProgress } from "@/server/services/contribution-plan.service";
+import { listPayoutsForCustomer } from "@/server/repositories/payout.repository";
 import { format } from "date-fns";
 
 const ADMIN_NAV_LINKS = [
   { href: "/admin", label: "Overview" },
   { href: "/admin/agents", label: "Agents" },
   { href: "/admin/customers", label: "Customers" },
+  { href: "/admin/payouts", label: "Payouts" },
+  { href: "/admin/reconciliations", label: "Reconciliations" },
+  { href: "/admin/reports", label: "Reports" },
 ];
 
 export default async function AdminCustomerDetailPage({
@@ -37,7 +43,11 @@ export default async function AdminCustomerDetailPage({
     notFound();
   }
 
-  const activeAgents = await listActiveAgents();
+  const [activeAgents, planWithProgress, payoutHistory] = await Promise.all([
+    listActiveAgents(),
+    getActivePlanWithProgress(customer.id),
+    listPayoutsForCustomer(customer.id),
+  ]);
   const availableAgentsForReassignment = activeAgents.filter(
     (agent) => agent.id !== customer.assignedAgentId
   );
@@ -112,6 +122,59 @@ export default async function AdminCustomerDetailPage({
               availableAgents={availableAgentsForReassignment}
             />
           </Card>
+
+          {/* Savings plan: progress if one is active, otherwise a form to start one */}
+          <Card className="lg:col-span-1">
+            <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-500">
+              Savings Plan
+            </h3>
+            {planWithProgress ? (
+              <dl className="space-y-3 text-sm">
+                <Row
+                  label="Daily amount"
+                  value={`₦${Number(planWithProgress.plan.dailyAmount).toLocaleString()}`}
+                />
+                <Row label="Total saved" value={`₦${planWithProgress.progress.totalSaved.toLocaleString()}`} />
+                <Row label="Days paid" value={String(planWithProgress.progress.daysPaid)} />
+                <Row label="Days missed" value={String(planWithProgress.progress.daysMissed)} />
+                <Row label="Days remaining" value={String(planWithProgress.progress.daysRemaining)} />
+                <Row
+                  label="Ref. maturity date"
+                  value={format(planWithProgress.plan.expectedMaturityDate, "dd MMM yyyy")}
+                />
+                <Row label="Status" value={<Badge tone="blue">{planWithProgress.plan.status}</Badge>} />
+              </dl>
+            ) : (
+              <>
+                <p className="mb-3 text-sm text-gray-500">
+                  No active savings plan. Start one to begin recording daily contributions.
+                </p>
+                <CreatePlanForm customerProfileId={customer.id} />
+              </>
+            )}
+          </Card>
+
+          {/* Payout history for this customer */}
+          {payoutHistory.length > 0 && (
+            <Card className="lg:col-span-1">
+              <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-500">
+                Payout History
+              </h3>
+              <ul className="space-y-3 text-sm">
+                {payoutHistory.map((payout) => (
+                  <li key={payout.id} className="border-l-2 border-emerald-200 pl-3">
+                    <p className="font-medium text-gray-900">
+                      ₦{Number(payout.totalSavings).toLocaleString()} · {payout.payoutMethod === "CASH" ? "Cash" : "Bank Transfer"}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {format(payout.payoutDate, "dd MMM yyyy")} · Receipt {payout.receiptNumber} · approved by{" "}
+                      {payout.approvedBy.name}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
 
           {/* Assignment history / audit trail */}
           <Card className="lg:col-span-2">

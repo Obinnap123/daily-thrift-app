@@ -7,6 +7,12 @@
 // Step 1: User model + Role enum (authentication foundation)
 // Step 2: Customer profiles, agent assignment, and rotation audit trail
 // Step 3: Agent & Customer Management (unique customer codes, passport photos)
+// Step 4: Contribution tracking, daily reconciliation, Maturity/Payout module,
+//         and the aggregate data behind the Admin/Agent dashboards & Reports.
+//         NOTE: there is no "Withdrawal" model anywhere in this schema — the
+//         thrift business model here is "save for a fixed cycle, then get
+//         paid out once", not "withdraw anytime". The Payout model below is
+//         the complete, deliberate replacement for that idea.
 //
 // Docs: https://pris.ly/d/prisma-schema
 // ============================================================================
@@ -33,7 +39,35 @@ datasource db {
 enum Role {
   ADMIN // Full system access: manage agents, customers, reports, settings
   AGENT // Field collector: registers customers, records daily contributions
-  CUSTOMER // Thrift contributor: views own savings, requests withdrawals
+  CUSTOMER // Thrift contributor: views own savings progress and payout status
+}
+
+/// Outcome of a single day's collection attempt for one customer.
+enum ContributionStatus {
+  COLLECTED // The agent collected the customer's daily amount.
+  MISSED // The agent visited (or the day passed) with no payment collected.
+}
+
+/// Lifecycle of a customer's savings cycle (ContributionPlan).
+enum PlanStatus {
+  ACTIVE // Still collecting daily contributions.
+  COMPLETED // Required number of PAID days reached — ready for payout.
+  PAID_OUT // Payout has been recorded; this cycle is closed.
+}
+
+/// How a completed payout was physically handed to the customer. Both are
+/// manual, offline actions — this system only RECORDS which one was used,
+/// it never moves money itself (see Payout model comment).
+enum PayoutMethod {
+  CASH
+  BANK_TRANSFER
+}
+
+/// Review state of an agent's End-of-Day cash reconciliation report.
+enum ReconciliationStatus {
+  SUBMITTED // Agent has submitted; awaiting Admin review.
+  APPROVED // Admin confirmed the report is correct.
+  REJECTED // Admin flagged a discrepancy (see reviewNote).
 }
 
 // ----------------------------------------------------------------------------
@@ -90,6 +124,21 @@ model User {
   /// who clicked "register" or "reassign").
   assignmentLogsPerformed AgentAssignmentLog[] @relation("AssignmentChangedBy")
 
+  /// Present only when role = AGENT. Every Contribution row this agent has
+  /// personally logged (collected or missed) for any of their customers.
+  contributionsCollected Contribution[] @relation("ContributionCollectedBy")
+
+  /// Present only when role = AGENT. This agent's own End-of-Day
+  /// reconciliation reports, one per calendar day submitted.
+  reconciliationsSubmitted DailyReconciliation[] @relation("ReconciliationAgent")
+
+  /// Present only when role = ADMIN. Reconciliation reports this admin has
+  /// reviewed (approved or rejected).
+  reconciliationsReviewed DailyReconciliation[] @relation("ReconciliationReviewedBy")
+
+  /// Present only when role = ADMIN. Payouts this admin approved.
+  payoutsApproved Payout[] @relation("PayoutApprovedBy")
+
   @@index([role])
   @@map("users")
 }
@@ -137,6 +186,17 @@ model CustomerProfile {
   /// newest first (see AgentAssignmentLog).
   assignmentLogs AgentAssignmentLog[]
 
+  /// This customer's savings cycles over time. Normally exactly one ACTIVE
+  /// plan at a time, plus zero or more historical COMPLETED/PAID_OUT ones
+  /// from previous cycles (a customer can save, get paid out, then start a
+  /// brand new cycle).
+  contributionPlans ContributionPlan[]
+
+  /// Every payout ever recorded for this customer (across all their
+  /// completed cycles) — shown in their profile's payout history.
+  payouts       Payout[]
+  contributions Contribution[]
+
   @@index([assignedAgentId])
   @@map("customer_profiles")
 }
@@ -170,4 +230,202 @@ model AgentAssignmentLog {
 
   @@index([customerProfileId])
   @@map("agent_assignment_logs")
+}
+
+/// One savings "cycle" for a customer — the terms of what they've committed
+/// to save, and where that cycle currently stands. A customer normally has
+/// exactly one ACTIVE plan; once it's COMPLETED and PAID_OUT, a brand new
+/// plan can be started for their next cycle (kept as a separate row rather
+/// than reusing/resetting the old one, so payout history stays intact).
+model ContributionPlan {
+  id String @id @default(cuid())
+
+  customerProfileId String
+  customerProfile   CustomerProfile @relation(fields: [customerProfileId], references: [id], onDelete: Cascade)
+
+  /// The amount the customer has committed to contribute each collection
+  /// day. Decimal (not Float) — this is money, never approximate.
+  dailyAmount Decimal @db.Decimal(12, 2)
+
+  /// Number of PAID days required to complete this cycle (e.g. 31). Maturity
+  /// is paid-day-based: a missed day pushes the expected finish date out
+  /// rather than shortening how much the customer actually saves.
+  durationDays Int @default(31)
+
+  /// The first day this plan expects a contribution.
+  startDate DateTime @db.Date
+
+  /// Reference date only = startDate + durationDays, assuming zero missed
+  /// days. Shown on the Savings Progress screen as "expected maturity date"
+  /// — the ACTUAL day the plan reaches COMPLETED may be later if any days
+  /// were missed (see ContributionPlanService for the real day-counting
+  /// logic; this column is never used to gate payout eligibility).
+  expectedMaturityDate DateTime @db.Date
+
+  status PlanStatus @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Every daily collection attempt (paid or missed) recorded against this
+  /// specific cycle.
+  contributions Contribution[]
+
+  /// The payout for this cycle, once one has been recorded. A plan can have
+  /// at most one payout — enforced by @unique on Payout.contributionPlanId.
+  payout Payout?
+
+  @@index([customerProfileId])
+  @@index([status])
+  @@map("contribution_plans")
+}
+
+/// One row per customer per calendar day — the atomic record of "did this
+/// customer pay today, or not". This single table is the foundation for
+/// almost every dashboard/report in the system: Agent Collection Summary,
+/// End-of-Day Reconciliation's "expected cash", Customer Savings Progress,
+/// and all date-range totals in Reports are all just aggregates over this
+/// table, never separately-tracked numbers that could drift out of sync.
+model Contribution {
+  id String @id @default(cuid())
+
+  contributionPlanId String
+  contributionPlan   ContributionPlan @relation(fields: [contributionPlanId], references: [id], onDelete: Cascade)
+
+  /// Denormalized on purpose: querying "this agent's collections today"
+  /// would otherwise require joining through ContributionPlan ->
+  /// CustomerProfile every time, on what is the single most frequently
+  /// queried table in the system (every dashboard hits it).
+  customerProfileId String
+  customerProfile   CustomerProfile @relation(fields: [customerProfileId], references: [id], onDelete: Cascade)
+
+  /// The agent who logged this entry (collected or missed).
+  collectedById String
+  collectedBy   User   @relation("ContributionCollectedBy", fields: [collectedById], references: [id], onDelete: Restrict)
+
+  /// The calendar day this row covers (date-only, time truncated) — never
+  /// the timestamp the agent happened to press "save".
+  collectionDate DateTime @db.Date
+
+  status ContributionStatus
+
+  /// The amount actually collected. Null when status = MISSED. When
+  /// COLLECTED, this is expected to equal the plan's dailyAmount at the time
+  /// of collection, but is stored explicitly (not just inferred from the
+  /// plan) so a historical record survives even if the plan's dailyAmount
+  /// were ever edited later.
+  amount Decimal? @db.Decimal(12, 2)
+
+  /// Optional free-text note (e.g. "Customer traveling", "Partial cash on
+  /// hand at visit").
+  note String?
+
+  createdAt DateTime @default(now())
+
+  /// One collection decision per plan per day — prevents accidentally
+  /// double-logging (or double-missing) the same customer on the same day.
+  @@unique([contributionPlanId, collectionDate])
+  @@index([customerProfileId])
+  @@index([collectedById, collectionDate])
+  @@index([collectionDate])
+  @@map("contributions")
+}
+
+/// An agent's End-of-Day cash reconciliation for one calendar day: what they
+/// physically collected in cash vs. what the system expects based on that
+/// day's logged Contribution rows, submitted for Admin review.
+model DailyReconciliation {
+  id String @id @default(cuid())
+
+  agentId String
+  agent   User   @relation("ReconciliationAgent", fields: [agentId], references: [id], onDelete: Cascade)
+
+  /// The calendar day this report covers.
+  reconciliationDate DateTime @db.Date
+
+  /// Snapshot of SUM(Contribution.amount) for this agent on this date, taken
+  /// at submission time — stored explicitly (not recomputed live) so the
+  /// report reflects what the agent actually saw and confirmed against,
+  /// even if a Contribution were edited afterward.
+  expectedCash Decimal @db.Decimal(12, 2)
+
+  /// What the agent declares they are physically holding in cash.
+  actualCash Decimal @db.Decimal(12, 2)
+
+  /// Agent's own explanation for any gap between expected and actual (e.g.
+  /// "Gave change from personal cash", "One customer paid twice by mistake").
+  agentNote String?
+
+  status ReconciliationStatus @default(SUBMITTED)
+
+  /// The Admin who reviewed this report. Null while status = SUBMITTED.
+  reviewedById String?
+  reviewedBy   User?   @relation("ReconciliationReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  /// Admin's note on approval/rejection (e.g. why it was rejected).
+  reviewNote String?
+  reviewedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// One reconciliation report per agent per day.
+  @@unique([agentId, reconciliationDate])
+  @@index([status])
+  @@map("daily_reconciliations")
+}
+
+/// A completed, manually-paid-out savings cycle. This is the deliberate
+/// replacement for a "Withdrawal" feature: customers never withdraw funds
+/// mid-cycle through this system. A Payout can only be created once its
+/// ContributionPlan has reached COMPLETED (all required days paid), and
+/// creating this row is itself the "Mark as Paid" action — it flips the
+/// linked plan's status to PAID_OUT in the same transaction.
+///
+/// ⚠️ No online payment integration: payoutMethod only RECORDS how the
+/// money was handed over (cash in hand, or a bank transfer the agent/admin
+/// made through their own banking app/branch) — this system never moves
+/// money itself, and stores no bank account numbers or payment credentials.
+model Payout {
+  id String @id @default(cuid())
+
+  /// One payout per cycle — enforced at the database level (a plan can't be
+  /// paid out twice).
+  contributionPlanId String           @unique
+  contributionPlan   ContributionPlan @relation(fields: [contributionPlanId], references: [id], onDelete: Restrict)
+
+  /// Denormalized for the same reason as Contribution.customerProfileId —
+  /// lets "this customer's payout history" and Reports query this table
+  /// directly without an extra join through ContributionPlan.
+  customerProfileId String
+  customerProfile   CustomerProfile @relation(fields: [customerProfileId], references: [id], onDelete: Restrict)
+
+  /// Snapshot of the plan's total collected amount at the moment of payout —
+  /// stored explicitly so the receipt/history stays stable and correct even
+  /// if Contribution rows were somehow edited afterward.
+  totalSavings Decimal @db.Decimal(12, 2)
+
+  payoutMethod PayoutMethod
+
+  /// The calendar day the money was actually handed over / transferred.
+  payoutDate DateTime @db.Date
+
+  /// The Admin who approved and recorded this payout.
+  approvedById String
+  approvedBy   User   @relation("PayoutApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)
+
+  /// System-generated, human-friendly unique receipt number (e.g.
+  /// "PR-000045"), backed by its own Postgres sequence (payout_receipt_seq)
+  /// for the same atomicity reason as CustomerProfile.customerCode.
+  receiptNumber String @unique
+
+  /// Optional free-text reference (e.g. "Transferred via GTBank" — never a
+  /// full account number or other sensitive payment credential).
+  note String?
+
+  createdAt DateTime @default(now())
+
+  @@index([customerProfileId])
+  @@index([payoutDate])
+  @@map("payouts")
 }

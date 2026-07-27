@@ -13,6 +13,9 @@ const ADMIN_NAV_LINKS = [
   { href: "/admin", label: "Overview" },
   { href: "/admin/agents", label: "Agents" },
   { href: "/admin/customers", label: "Customers" },
+  { href: "/admin/payouts", label: "Payouts" },
+  { href: "/admin/reconciliations", label: "Reconciliations" },
+  { href: "/admin/reports", label: "Reports" },
 ];
 
 export default async function AdminNewCustomerPage() {
