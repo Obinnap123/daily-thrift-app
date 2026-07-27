@@ -8,9 +8,14 @@
  * `redirect: false` so we can show inline errors instead of a full page
  * navigation to a generic NextAuth error page.
  *
- * A single "identifier" field accepts either an email (Admin/Agent) or a
- * phone number (Customer) — see lib/auth.ts for how the server decides
- * which lookup to perform.
+ * The underlying credential is always a single "identifier" field (email or
+ * phone — see lib/auth.ts for how the server decides which lookup to
+ * perform) — that hasn't changed. What DOES change per `role` is purely
+ * presentational: the field's label/placeholder/autocomplete hint, so an
+ * Admin/Agent sees "Email Address" and a Customer sees "Phone Number",
+ * matching whichever dedicated login page (/login/admin, /login/agent,
+ * /login/customer) rendered this form. There is still exactly one
+ * `loginSchema` / one `authorize()` code path underneath.
  */
 import { useState } from "react";
 import { useForm } from "react-hook-form";
@@ -19,13 +24,50 @@ import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { loginSchema, type LoginInput } from "@/validations/auth";
 import { Input } from "@/components/ui/Input";
+import { PasswordInput } from "@/components/ui/PasswordInput";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 
-export function LoginForm() {
+type LoginRole = "admin" | "agent" | "customer";
+
+const ROLE_FIELD_CONFIG: Record<
+  LoginRole,
+  { label: string; placeholder: string; type: string; autoComplete: string; hint: string }
+> = {
+  admin: {
+    label: "Email Address",
+    placeholder: "you@example.com",
+    type: "email",
+    autoComplete: "username",
+    hint: "Sign in with your Admin email address.",
+  },
+  agent: {
+    label: "Email Address",
+    placeholder: "you@example.com",
+    type: "email",
+    autoComplete: "username",
+    hint: "Sign in with your Agent email address.",
+  },
+  customer: {
+    label: "Phone Number",
+    placeholder: "08031234567",
+    type: "tel",
+    autoComplete: "username",
+    hint: "Sign in with the phone number registered by your agent.",
+  },
+};
+
+interface LoginFormProps {
+  /** Which dedicated login page rendered this form — controls the
+   * identifier field's label/placeholder/type only (see file header). */
+  role: LoginRole;
+}
+
+export function LoginForm({ role }: LoginFormProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [formError, setFormError] = useState<string | null>(null);
+  const fieldConfig = ROLE_FIELD_CONFIG[role];
 
   const {
     register,
@@ -58,16 +100,15 @@ export function LoginForm() {
     <Card>
       <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4" noValidate>
         <Input
-          label="Email or Phone Number"
-          type="text"
-          autoComplete="username"
-          placeholder="you@example.com or 08031234567"
+          label={fieldConfig.label}
+          type={fieldConfig.type}
+          autoComplete={fieldConfig.autoComplete}
+          placeholder={fieldConfig.placeholder}
           error={errors.identifier?.message}
           {...register("identifier")}
         />
-        <Input
+        <PasswordInput
           label="Password"
-          type="password"
           autoComplete="current-password"
           placeholder="••••••••"
           error={errors.password?.message}
@@ -84,10 +125,7 @@ export function LoginForm() {
           Sign in
         </Button>
 
-        <p className="text-center text-xs text-gray-500">
-          Admins &amp; Agents sign in with their email. Customers sign in
-          with their registered phone number.
-        </p>
+        <p className="text-center text-xs text-gray-500">{fieldConfig.hint}</p>
       </form>
     </Card>
   );
