@@ -21,6 +21,7 @@ import { useRouter } from "next/navigation";
 import { registerCustomerSchema, type RegisterCustomerInput } from "@/validations/customer";
 import { registerCustomerAction } from "@/server/actions/customer.actions";
 import { Input } from "@/components/ui/Input";
+import { PasswordInput } from "@/components/ui/PasswordInput";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/providers/ToastProvider";
@@ -131,17 +132,15 @@ export function RegisterCustomerForm({
         <input type="hidden" {...register("assignedAgentId")} />
       )}
 
-      <Input
+      <PasswordInput
         label="Password"
-        type="password"
         autoComplete="new-password"
         placeholder="At least 8 characters"
         error={errors.password?.message}
         {...register("password")}
       />
-      <Input
+      <PasswordInput
         label="Confirm password"
-        type="password"
         autoComplete="new-password"
         error={errors.confirmPassword?.message}
         {...register("confirmPassword")}

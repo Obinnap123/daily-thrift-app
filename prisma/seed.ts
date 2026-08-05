@@ -8,8 +8,8 @@
  *
  * Run with: npm run db:seed
  *
- * Reads credentials from environment variables so the initial admin
- * password is never hardcoded in source control:
+ * Requires credentials from environment variables so the initial admin
+ * password is never hardcoded in source control or printed to logs:
  *   SEED_ADMIN_EMAIL, SEED_ADMIN_PASSWORD, SEED_ADMIN_NAME
  */
 import "dotenv/config";
@@ -21,9 +21,9 @@ const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
-  const email = process.env.SEED_ADMIN_EMAIL ?? "admin@davchuks.com";
-  const password = process.env.SEED_ADMIN_PASSWORD ?? "ChangeMe123!";
-  const name = process.env.SEED_ADMIN_NAME ?? "System Administrator";
+  const email = requiredEnv("SEED_ADMIN_EMAIL");
+  const password = requiredEnv("SEED_ADMIN_PASSWORD");
+  const name = requiredEnv("SEED_ADMIN_NAME");
 
   const existingAdmin = await prisma.user.findUnique({ where: { email } });
   if (existingAdmin) {
@@ -45,9 +45,14 @@ async function main() {
   console.log("----------------------------------------------------------");
   console.log("✅ Admin account created:");
   console.log(`   Email:    ${admin.email}`);
-  console.log(`   Password: ${password}`);
-  console.log("   ⚠️  Log in and change this password immediately.");
+  console.log("   Password: stored securely in the seed environment");
   console.log("----------------------------------------------------------");
+}
+
+function requiredEnv(name: "SEED_ADMIN_EMAIL" | "SEED_ADMIN_PASSWORD" | "SEED_ADMIN_NAME") {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`${name} must be set before running the database seed.`);
+  return value;
 }
 
 main()

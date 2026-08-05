@@ -16,6 +16,7 @@ import { useRouter } from "next/navigation";
 import { createAgentSchema, type CreateAgentInput } from "@/validations/auth";
 import { createAgentAction } from "@/server/actions/agent.actions";
 import { Input } from "@/components/ui/Input";
+import { PasswordInput } from "@/components/ui/PasswordInput";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/providers/ToastProvider";
 
@@ -81,17 +82,15 @@ export function CreateAgentForm() {
         error={errors.phone?.message}
         {...register("phone")}
       />
-      <Input
+      <PasswordInput
         label="Password"
-        type="password"
         autoComplete="new-password"
         placeholder="At least 8 characters"
         error={errors.password?.message}
         {...register("password")}
       />
-      <Input
+      <PasswordInput
         label="Confirm password"
-        type="password"
         autoComplete="new-password"
         error={errors.confirmPassword?.message}
         {...register("confirmPassword")}

@@ -50,8 +50,6 @@ export const PasswordInput = forwardRef<HTMLInputElement, PasswordInputProps>(
             onClick={() => setIsVisible((visible) => !visible)}
             className="absolute inset-y-0 right-0 flex items-center px-3 text-ink-subtle hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"
             aria-label={isVisible ? "Hide password" : "Show password"}
-            // Keep this control out of the normal Tab order — it's a
-            // convenience toggle, not part of the field-to-field form flow.
           >
             {isVisible ? <EyeSlashIcon /> : <EyeIcon />}
           </button>
