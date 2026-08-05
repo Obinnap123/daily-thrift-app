@@ -30,6 +30,29 @@ import type {
 } from "@/validations/contribution";
 import { ok, fail } from "@/lib/action-result";
 import { revalidatePath } from "next/cache";
+import { prisma } from "@/lib/prisma";
+import { writeAuditLog } from "@/server/services/audit.service";
+
+export async function searchQuickPayCustomersAction(query: string) {
+  const user = await requireRole(["ADMIN", "AGENT"]);
+  const search = query.trim();
+  const customers = await prisma.customerProfile.findMany({
+    where: {
+      ...(user.role === "AGENT" ? { assignedAgentId: user.id } : {}),
+      user: { isActive: true },
+      contributionPlans: { some: { status: "ACTIVE" } },
+      ...(search ? { OR: [
+        { customerCode: { contains: search, mode: "insensitive" } },
+        { user: { name: { contains: search, mode: "insensitive" } } },
+        { user: { phone: { contains: search } } },
+      ] } : {}),
+    },
+    select: { id: true, customerCode: true, user: { select: { name: true, phone: true } } },
+    orderBy: { updatedAt: "desc" },
+    take: 20,
+  });
+  return customers.map((customer) => ({ id: customer.id, customerCode: customer.customerCode, name: customer.user.name, phone: customer.user.phone }));
+}
 
 async function assertCanManageCustomer(customerProfileId: string) {
   const user = await requireRole(["ADMIN", "AGENT"]);
@@ -47,6 +70,7 @@ export async function createContributionPlanAction(input: CreateContributionPlan
   if (error) return error;
 
   const result = await createContributionPlan(input);
+  await writeAuditLog({ actorId: user!.id, actorRole: user!.role, action: "SAVINGS_PERIOD_STARTED", outcome: result.success ? "SUCCESS" : "FAILURE", entityType: "CustomerProfile", entityId: input.customerProfileId, summary: result.success ? "Savings period started." : result.message, metadata: result.success ? { dailyAmount: input.dailyAmount, startDate: input.startDate.toISOString() } : undefined });
 
   if (result.success) {
     revalidatePath("/admin/customers");
@@ -64,6 +88,16 @@ export async function recordContributionAction(input: RecordContributionInput) {
   if (error) return error;
 
   const result = await recordContribution(input, user!.id);
+
+  await writeAuditLog({
+    actorId: user!.id,
+    actorRole: user!.role,
+    action: input.status === "COLLECTED" ? "CONTRIBUTION_RECORDED" : "MISSED_VISIT_RECORDED",
+    outcome: result.success ? "SUCCESS" : "FAILURE",
+    entityType: "CustomerProfile",
+    entityId: input.customerProfileId,
+    summary: result.success ? "Daily collection outcome recorded." : result.message,
+  });
 
   if (result.success) {
     revalidatePath("/agent");
@@ -91,7 +125,15 @@ export async function getCustomerPlanForQuickPayAction(customerProfileId: string
 
   const plan = await findActivePlanForCustomer(customerProfileId);
   if (!plan) {
-    return ok({ plan: null, alreadyPaidToday: false });
+    const previous = await prisma.contributionPlan.findFirst({
+      where: { customerProfileId },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!previous) return ok({ plan: null, alreadyPaidToday: false });
+    return ok({
+      plan: { id: previous.id, dailyAmount: Number(previous.dailyAmount), durationDays: 31 },
+      alreadyPaidToday: false,
+    });
   }
 
   const existing = await findContributionForPlanAndDate(plan.id, today());
@@ -113,6 +155,17 @@ export async function recordQuickPayAction(input: QuickPayInput) {
 
   const result = await recordQuickPay(input, user!.id, user!.role === "ADMIN");
 
+  await writeAuditLog({
+    actorId: user!.id,
+    actorRole: user!.role,
+    action: "QUICK_PAY",
+    outcome: result.success ? "SUCCESS" : "FAILURE",
+    entityType: "CustomerProfile",
+    entityId: input.customerProfileId,
+    summary: result.success ? `Payment recorded with receipt ${result.data.receiptNumber}.` : result.message,
+    metadata: result.success ? { amount: input.amount, receiptNumber: result.data.receiptNumber } : undefined,
+  });
+
   if (result.success) {
     revalidatePath("/agent");
     revalidatePath("/agent/collections");
@@ -121,6 +174,8 @@ export async function recordQuickPayAction(input: QuickPayInput) {
     revalidatePath(`/agent/customers/${input.customerProfileId}`);
     revalidatePath("/admin/payouts");
     revalidatePath("/customer");
+    revalidatePath("/admin/tracking");
+    revalidatePath("/agent/tracking");
   }
 
   return result;

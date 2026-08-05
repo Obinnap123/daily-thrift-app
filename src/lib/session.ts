@@ -10,7 +10,7 @@
  */
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import type { Role } from "@/generated/prisma/enums";
+import type { Role } from "@/generated/prisma/client";
 
 /** Returns the current session's user, or null if not logged in. */
 export async function getCurrentUser() {

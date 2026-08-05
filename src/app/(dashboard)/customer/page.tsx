@@ -22,6 +22,7 @@ import { DashboardHeader } from "@/components/layout/DashboardHeader";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { format } from "date-fns";
+import { MonthlyTrackingSheets } from "@/components/dashboard/MonthlyTrackingSheets";
 
 export default async function CustomerDashboardPage() {
   const user = await requireRole("CUSTOMER");
@@ -113,7 +114,7 @@ export default async function CustomerDashboardPage() {
           </div>
 
           {planWithProgress ? (
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
               <ProgressStat
                 label="Daily contribution"
                 value={`₦${Number(planWithProgress.plan.dailyAmount).toLocaleString()}`}
@@ -146,6 +147,11 @@ export default async function CustomerDashboardPage() {
             </p>
           )}
         </Card>
+
+        <section>
+          <h2 className="mb-3 text-lg font-semibold text-gray-900">My 31-Day Tracking Sheets</h2>
+          <MonthlyTrackingSheets customerProfileId={profile.id} />
+        </section>
 
         {/* Payout history */}
         {payoutHistory.length > 0 && (

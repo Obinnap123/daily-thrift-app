@@ -46,20 +46,19 @@ export interface PlanProgress {
  * must reflect every naira actually collected, override or not.
  */
 export function computePlanProgress(
-  plan: { durationDays: number },
+  plan: { durationDays: number; dailyAmount?: unknown },
   contributions: { status: "COLLECTED" | "MISSED"; amount: unknown; collectionDate: Date }[]
 ): PlanProgress {
-  const collectedDayKeys = new Set(
-    contributions
-      .filter((c) => c.status === "COLLECTED")
-      .map((c) => c.collectionDate.toISOString().slice(0, 10))
-  );
-  const daysPaid = collectedDayKeys.size;
-  const daysMissed = contributions.filter((c) => c.status === "MISSED").length;
-  const daysRemaining = Math.max(0, plan.durationDays - daysPaid);
   const totalSaved = contributions
     .filter((c) => c.status === "COLLECTED")
     .reduce((sum, c) => sum + Number(c.amount ?? 0), 0);
+  const dailyAmount = Number(plan.dailyAmount ?? 1);
+  const daysPaid = Math.floor(totalSaved / dailyAmount);
+  const daysMissed = contributions.filter((c) => c.status === "MISSED").length;
+  const daysInCurrentSheet = daysPaid % plan.durationDays;
+  const daysRemaining = daysPaid > 0 && daysInCurrentSheet === 0
+    ? 0
+    : Math.max(0, plan.durationDays - daysInCurrentSheet);
 
   return {
     daysPaid,
@@ -104,6 +103,7 @@ export async function createContributionPlan(
       durationDays,
       startDate: start,
       expectedMaturityDate,
+      nextCoverageDate: start,
     },
   });
 
@@ -117,19 +117,9 @@ export async function createContributionPlan(
  * with its actual Contribution history rather than drifting.
  */
 export async function refreshPlanCompletionStatus(contributionPlanId: string): Promise<void> {
-  const plan = await prisma.contributionPlan.findUnique({
-    where: { id: contributionPlanId },
-    include: { contributions: { select: { status: true, amount: true, collectionDate: true } } },
-  });
-  if (!plan || plan.status !== "ACTIVE") return;
-
-  const progress = computePlanProgress(plan, plan.contributions);
-  if (progress.isReadyToComplete) {
-    await prisma.contributionPlan.update({
-      where: { id: contributionPlanId },
-      data: { status: "COMPLETED" },
-    });
-  }
+  // Reaching 31 funded calendar cells now completes a monthly sheet, not the
+  // overall savings period. The plan stays ACTIVE until a payout closes it.
+  void contributionPlanId;
 }
 
 /** Fetch a customer's active plan (or null) together with its computed progress. */
@@ -137,7 +127,7 @@ export async function getActivePlanWithProgress(customerProfileId: string) {
   const plan = await prisma.contributionPlan.findFirst({
     where: { customerProfileId, status: "ACTIVE" },
     orderBy: { createdAt: "desc" },
-    include: { contributions: true },
+    include: { contributions: true, allocations: true },
   });
   if (!plan) return null;
 

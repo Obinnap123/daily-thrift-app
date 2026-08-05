@@ -8,39 +8,52 @@
  * `collectionDate` values are always comparable regardless of what time of
  * day the agent happened to press "record".
  */
-import {
-  startOfDay,
-  startOfWeek,
-  endOfWeek,
-  startOfMonth,
-  endOfMonth,
-  addDays,
-} from "date-fns";
+const BUSINESS_TIME_ZONE = "Africa/Lagos";
 
-/** Truncate a Date to midnight UTC-local — safe to store in a `@db.Date` column. */
+/** Preserve a calendar date at UTC midnight — safe for a Postgres `DATE` column. */
 export function toDateOnly(date: Date): Date {
-  return startOfDay(date);
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
 }
 
-/** Today, truncated to a plain date (no time component). */
+/** Today's Lagos calendar date represented without a time component. */
 export function today(): Date {
-  return startOfDay(new Date());
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: BUSINESS_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return new Date(Date.UTC(Number(value.year), Number(value.month) - 1, Number(value.day)));
 }
 
 /** [Monday, Sunday] range containing `date` — used for "this week" totals. */
-export function weekRange(date: Date = new Date()): { start: Date; end: Date } {
+export function weekRange(date: Date = today()): { start: Date; end: Date } {
+  const anchor = toDateOnly(date);
+  const daysSinceMonday = (anchor.getUTCDay() + 6) % 7;
   return {
-    start: startOfWeek(date, { weekStartsOn: 1 }),
-    end: endOfWeek(date, { weekStartsOn: 1 }),
+    start: addDaysToDate(anchor, -daysSinceMonday),
+    end: addDaysToDate(anchor, 6 - daysSinceMonday),
   };
 }
 
 /** [1st, last day] range containing `date` — used for "this month" totals. */
-export function monthRange(date: Date = new Date()): { start: Date; end: Date } {
-  return { start: startOfMonth(date), end: endOfMonth(date) };
+export function monthRange(date: Date = today()): { start: Date; end: Date } {
+  const anchor = toDateOnly(date);
+  return {
+    start: new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth(), 1)),
+    end: new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth() + 1, 0)),
+  };
 }
 
 /** `startDate + durationDays` — the plan's reference (not guaranteed) maturity date. */
 export function addDaysToDate(date: Date, days: number): Date {
-  return addDays(date, days);
+  const result = toDateOnly(date);
+  result.setUTCDate(result.getUTCDate() + days);
+  return result;
+}
+
+/** Stable key for comparing values from Postgres DATE columns. */
+export function dateKey(date: Date): string {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
 }

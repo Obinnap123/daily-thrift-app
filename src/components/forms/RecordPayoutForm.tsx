@@ -24,10 +24,12 @@ import { format } from "date-fns";
 
 interface RecordPayoutFormProps {
   contributionPlanId: string;
+  dailyAmount?: number;
+  grossSavings?: number;
   onSuccess?: (receiptNumber: string) => void;
 }
 
-export function RecordPayoutForm({ contributionPlanId, onSuccess }: RecordPayoutFormProps) {
+export function RecordPayoutForm({ contributionPlanId, dailyAmount = 0, grossSavings = 0, onSuccess }: RecordPayoutFormProps) {
   const router = useRouter();
   const { showToast } = useToast();
   const [formError, setFormError] = useState<string | null>(null);
@@ -68,6 +70,23 @@ export function RecordPayoutForm({ contributionPlanId, onSuccess }: RecordPayout
     <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4" noValidate>
       <input type="hidden" {...register("contributionPlanId")} />
 
+      {grossSavings > 0 && (
+        <div className="grid gap-3 rounded-xl border border-line bg-surface-muted p-4 min-[380px]:grid-cols-3">
+          <div>
+            <span className="block text-xs text-ink-muted">Gross savings</span>
+            <strong className="mt-1 block tabular-nums text-sm text-ink">₦{grossSavings.toLocaleString()}</strong>
+          </div>
+          <div>
+            <span className="block text-xs text-ink-muted">One commission</span>
+            <strong className="mt-1 block tabular-nums text-sm text-ink">₦{dailyAmount.toLocaleString()}</strong>
+          </div>
+          <div>
+            <span className="block text-xs text-ink-muted">Customer receives</span>
+            <strong className="mt-1 block tabular-nums text-sm text-brand">₦{Math.max(0, grossSavings - dailyAmount).toLocaleString()}</strong>
+          </div>
+        </div>
+      )}
+
       <Select label="Payout method" error={errors.payoutMethod?.message} {...register("payoutMethod")}>
         <option value="CASH">Cash</option>
         <option value="BANK_TRANSFER">Bank Transfer</option>
@@ -87,7 +106,7 @@ export function RecordPayoutForm({ contributionPlanId, onSuccess }: RecordPayout
         {...register("note")}
       />
 
-      <p className="text-xs text-gray-500">
+      <p className="rounded-xl border border-warning/30 bg-warning-soft px-3 py-2.5 text-xs leading-relaxed text-warning">
         This system does not process payments. Only record a payout after the
         cash has been physically handed over or the bank transfer has been
         completed outside this application.
@@ -100,7 +119,7 @@ export function RecordPayoutForm({ contributionPlanId, onSuccess }: RecordPayout
       )}
 
       <Button type="submit" isLoading={isSubmitting} className="w-full">
-        Record Payout &amp; Mark as Paid
+        Complete Payout &amp; Close Period
       </Button>
     </form>
   );

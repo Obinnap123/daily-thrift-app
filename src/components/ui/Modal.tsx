@@ -14,7 +14,7 @@
  * (e.g. a long Quick Pay form) is taller than the viewport — so it never
  * gets clipped on small/short screens.
  */
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 interface ModalProps {
@@ -28,12 +28,16 @@ interface ModalProps {
 
 export function Modal({ isOpen, onClose, title, children, panelClassName }: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const titleId = useId();
 
   // Close on Escape, and lock page scroll while open.
   useEffect(() => {
     if (!isOpen) return;
 
-    function handleKeyDown(event: KeyboardEvent) {
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
+
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
       if (event.key === "Escape") onClose();
     }
     document.addEventListener("keydown", handleKeyDown);
@@ -47,19 +51,37 @@ export function Modal({ isOpen, onClose, title, children, panelClassName }: Moda
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
       document.body.style.overflow = previousOverflow;
+      previousFocusRef.current?.focus();
     };
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
+  function keepFocusInside(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "Tab" || !panelRef.current) return;
+    const focusable = [...panelRef.current.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )];
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6"
+      className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-6"
       role="presentation"
     >
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-gray-900/50"
+        className="fixed inset-0 cursor-default bg-black/60 backdrop-blur-[2px]"
         aria-hidden="true"
         onClick={onClose}
       />
@@ -69,21 +91,22 @@ export function Modal({ isOpen, onClose, title, children, panelClassName }: Moda
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label={title}
+        aria-labelledby={titleId}
         tabIndex={-1}
+        onKeyDown={keepFocusInside}
         className={cn(
-          "relative flex max-h-[90vh] w-full flex-col overflow-hidden rounded-xl bg-white shadow-xl",
-          "sm:max-w-lg",
+          "relative flex max-h-[calc(100dvh-0.5rem)] w-full flex-col overflow-hidden rounded-t-2xl border border-line bg-surface-raised text-ink shadow-2xl",
+          "sm:max-h-[90dvh] sm:max-w-lg sm:rounded-2xl",
           panelClassName
         )}
       >
-        <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3.5 sm:px-6">
-          <h2 className="text-base font-semibold text-gray-900">{title}</h2>
+        <div className="flex items-center justify-between border-b border-line px-4 py-3.5 sm:px-6">
+          <h2 id={titleId} className="text-base font-semibold text-ink">{title}</h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+            className="flex min-h-11 min-w-11 items-center justify-center rounded-xl text-ink-subtle hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
               <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />

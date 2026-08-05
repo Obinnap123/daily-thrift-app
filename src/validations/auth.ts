@@ -28,6 +28,7 @@ export const loginSchema = z.object({
     .trim()
     .min(1, "Enter your email or phone number"),
   password: z.string().min(1, "Password is required"),
+  portalRole: z.enum(["ADMIN", "AGENT", "CUSTOMER"]),
 });
 
 export type LoginInput = z.infer<typeof loginSchema>;

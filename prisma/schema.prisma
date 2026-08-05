@@ -28,7 +28,6 @@ generator client {
 // (for the running application). See https://pris.ly/d/config-datasource
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 // ----------------------------------------------------------------------------
@@ -78,6 +77,11 @@ enum ReconciliationStatus {
   SUBMITTED // Agent has submitted; awaiting Admin review.
   APPROVED // Admin confirmed the report is correct.
   REJECTED // Admin flagged a discrepancy (see reviewNote).
+}
+
+enum AuditOutcome {
+  SUCCESS
+  FAILURE
 }
 
 // ----------------------------------------------------------------------------
@@ -152,6 +156,9 @@ model User {
   /// Present only when role = ADMIN. Contribution rows where this admin
   /// authorized a same-day duplicate-payment override.
   contributionOverridesApproved Contribution[] @relation("ContributionOverriddenBy")
+
+  notifications Notification[]
+  auditLogs     AuditLog[]
 
   @@index([role])
   @@map("users")
@@ -278,12 +285,23 @@ model ContributionPlan {
 
   status PlanStatus @default(ACTIVE)
 
+  /// Money collected but not yet enough to fund another complete daily cell.
+  creditBalance Decimal @default(0) @db.Decimal(12, 2)
+
+  /// The next calendar cell that a payment will fund. It advances across
+  /// month boundaries and is snapshotted at payout for the next period.
+  nextCoverageDate DateTime? @db.Date
+
+  /// Set when payout closes this entire savings period.
+  endedAt DateTime? @db.Date
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   /// Every daily collection attempt (paid or missed) recorded against this
   /// specific cycle.
   contributions Contribution[]
+  allocations   ContributionAllocation[]
 
   /// The payout for this cycle, once one has been recorded. A plan can have
   /// at most one payout — enforced by @unique on Payout.contributionPlanId.
@@ -364,6 +382,8 @@ model Contribution {
 
   createdAt DateTime @default(now())
 
+  allocations ContributionAllocation[]
+
   /// Historical note: prior to the Quick Pay migration this was a plain
   /// `@@unique([contributionPlanId, collectionDate])`, which made it
   /// impossible for an Admin to ever record an approved same-day duplicate.
@@ -377,6 +397,28 @@ model Contribution {
   @@index([collectedById, collectionDate])
   @@index([collectionDate])
   @@map("contributions")
+}
+
+/// A fully funded calendar cell in the 31-column monthly tracker. The actual
+/// cash transaction remains in Contribution; this row records where that
+/// payment was allocated, allowing one payment to cover several days.
+model ContributionAllocation {
+  id String @id @default(cuid())
+
+  contributionPlanId String
+  contributionPlan   ContributionPlan @relation(fields: [contributionPlanId], references: [id], onDelete: Cascade)
+
+  contributionId String?
+  contribution   Contribution? @relation(fields: [contributionId], references: [id], onDelete: SetNull)
+
+  coverageDate DateTime @db.Date
+  amount       Decimal  @db.Decimal(12, 2)
+  createdAt    DateTime @default(now())
+
+  @@unique([contributionPlanId, coverageDate])
+  @@index([contributionId])
+  @@index([coverageDate])
+  @@map("contribution_allocations")
 }
 
 /// An agent's End-of-Day cash reconciliation for one calendar day: what they
@@ -453,6 +495,14 @@ model Payout {
   /// if Contribution rows were somehow edited afterward.
   totalSavings Decimal @db.Decimal(12, 2)
 
+  /// Immutable accounting snapshots used by dashboards and receipts.
+  grossSavings       Decimal   @default(0) @db.Decimal(12, 2)
+  commissionAmount   Decimal   @default(0) @db.Decimal(12, 2)
+  customerAmount     Decimal   @default(0) @db.Decimal(12, 2)
+  commissionDays     Int       @default(1)
+  minimumPayoutSlots Int       @default(2)
+  lastCoveredDate    DateTime? @db.Date
+
   payoutMethod PayoutMethod
 
   /// The calendar day the money was actually handed over / transferred.
@@ -476,4 +526,62 @@ model Payout {
   @@index([customerProfileId])
   @@index([payoutDate])
   @@map("payouts")
+}
+
+/// Singleton, admin-managed business identity and operational rules.
+model BusinessSettings {
+  id                       String   @id @default("default")
+  businessName             String   @default("Davchuks Daily Thrift")
+  supportPhone             String?
+  supportEmail             String?
+  businessAddress          String?
+  receiptFooter            String?
+  minimumPayoutSlots       Int      @default(2)
+  commissionDays           Int      @default(1)
+  agentPayoutEnabled       Boolean  @default(true)
+  notifyAdminOnAgentPayout Boolean  @default(true)
+  notifyAgentOnAdminPayout Boolean  @default(true)
+  updatedAt                DateTime @updatedAt
+
+  @@map("business_settings")
+}
+
+/// Persistent staff notification. Customers deliberately do not receive an
+/// inbox; the service layer only creates rows for ADMIN and AGENT users.
+model Notification {
+  id          String    @id @default(cuid())
+  recipientId String
+  recipient   User      @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  title       String
+  message     String
+  href        String?
+  readAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([recipientId, readAt, createdAt])
+  @@map("notifications")
+}
+
+/// Append-only operational audit record. Metadata must contain safe business
+/// context only; passwords, secrets, and complete financial credentials are
+/// never written here.
+model AuditLog {
+  id         String       @id @default(cuid())
+  actorId    String?
+  actor      User?        @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actorRole  Role?
+  action     String
+  outcome    AuditOutcome
+  entityType String?
+  entityId   String?
+  summary    String
+  metadata   Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime     @default(now())
+
+  @@index([createdAt])
+  @@index([actorId, createdAt])
+  @@index([action, outcome])
+  @@map("audit_logs")
 }

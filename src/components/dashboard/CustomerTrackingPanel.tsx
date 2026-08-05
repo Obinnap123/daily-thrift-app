@@ -32,6 +32,7 @@ import { QuickPayButton } from "@/components/forms/QuickPayButton";
 import { CreatePlanForm } from "@/components/forms/CreatePlanForm";
 import type { CustomerSearchOption } from "@/components/forms/CustomerSearchSelect";
 import { format } from "date-fns";
+import { MonthlyTrackingSheets } from "@/components/dashboard/MonthlyTrackingSheets";
 
 interface CustomerTrackingPanelProps {
   customerProfileId: string;
@@ -112,6 +113,8 @@ export function CustomerTrackingPanel({
           </>
         )}
       </Card>
+
+      <MonthlyTrackingSheets customerProfileId={customerProfileId} />
 
       {/* Quick Record Payment */}
       <Card>

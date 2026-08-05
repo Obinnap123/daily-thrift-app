@@ -28,6 +28,7 @@ import { prisma } from "@/lib/prisma";
 import { verifyPassword } from "@/lib/password";
 import { loginSchema } from "@/validations/auth";
 import { normalizePhone } from "@/lib/phone";
+import { writeAuditLog } from "@/server/services/audit.service";
 import { authConfig } from "@/lib/auth.config";
 
 /**
@@ -53,33 +54,48 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       credentials: {
         identifier: { label: "Email or Phone Number", type: "text" },
         password: { label: "Password", type: "password" },
+        portalRole: { label: "Portal role", type: "text" },
       },
       async authorize(rawCredentials) {
         // Validate shape/format before touching the database.
         const parsed = loginSchema.safeParse(rawCredentials);
         if (!parsed.success) return null;
 
-        const { identifier, password } = parsed.data;
+        const { identifier, password, portalRole } = parsed.data;
 
         const user = await prisma.user.findUnique({
           where: resolveIdentifierLookup(identifier),
         });
-        if (!user) return null;
+        if (!user) {
+          await writeAuditLog({ action: "SIGN_IN", outcome: "FAILURE", summary: "Sign-in rejected: account not found." });
+          return null;
+        }
+
+        if (user.role !== portalRole) {
+          await writeAuditLog({ actorId: user.id, actorRole: user.role, action: "SIGN_IN", outcome: "FAILURE", entityType: "User", entityId: user.id, summary: "Sign-in rejected: incorrect portal." });
+          return null;
+        }
 
         // Block disabled accounts (e.g. an agent who was let go).
-        if (!user.isActive) return null;
+        if (!user.isActive) {
+          await writeAuditLog({ actorId: user.id, actorRole: user.role, action: "SIGN_IN", outcome: "FAILURE", entityType: "User", entityId: user.id, summary: "Sign-in rejected: account is inactive." });
+          return null;
+        }
 
         const isValidPassword = await verifyPassword(password, user.passwordHash);
-        if (!isValidPassword) return null;
+        if (!isValidPassword) {
+          await writeAuditLog({ actorId: user.id, actorRole: user.role, action: "SIGN_IN", outcome: "FAILURE", entityType: "User", entityId: user.id, summary: "Sign-in rejected: invalid credentials." });
+          return null;
+        }
 
         // Record the successful login time. We deliberately `await` this
         // (rather than fire-and-forget) because serverless/edge runtimes can
         // terminate the function as soon as the response is sent, which
         // would silently drop an un-awaited update before it reaches the DB.
-        await prisma.user.update({
-          where: { id: user.id },
-          data: { lastLoginAt: new Date() },
-        });
+        await Promise.all([
+          prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } }),
+          writeAuditLog({ actorId: user.id, actorRole: user.role, action: "SIGN_IN", outcome: "SUCCESS", entityType: "User", entityId: user.id, summary: `${user.name} signed in.` }),
+        ]);
 
         // The object returned here becomes `user` in the jwt() callback below.
         return {

@@ -12,7 +12,7 @@
  * and Server Components. `src/middleware.ts` uses this file directly.
  */
 import type { NextAuthConfig } from "next-auth";
-import type { Role } from "@/generated/prisma/enums";
+import type { Role } from "@/generated/prisma/client";
 
 export const authConfig: NextAuthConfig = {
   // Required when running behind a reverse proxy (this sandbox, and most

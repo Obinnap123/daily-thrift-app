@@ -10,6 +10,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
+import { Modal } from "@/components/ui/Modal";
 import { RecordPayoutForm } from "@/components/forms/RecordPayoutForm";
 
 interface PayoutRowProps {
@@ -17,36 +18,42 @@ interface PayoutRowProps {
   customerName: string;
   dailyAmount: number;
   durationDays: number;
+  grossSavings?: number;
+  receiptBasePath?: string;
 }
 
-export function PayoutRow({ contributionPlanId, customerName }: PayoutRowProps) {
+export function PayoutRow({ contributionPlanId, customerName, dailyAmount, grossSavings, receiptBasePath = "/admin/payouts" }: PayoutRowProps) {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
 
-  if (!isOpen) {
-    return (
-      <Button type="button" size="sm" onClick={() => setIsOpen(true)}>
+  return (
+    <>
+      <Button type="button" size="sm" className="w-full md:w-auto" onClick={() => setIsOpen(true)}>
         Record Payout
       </Button>
-    );
-  }
-
-  return (
-    <div className="w-72 rounded-lg border border-gray-200 bg-gray-50 p-4">
-      <p className="mb-2 text-xs font-medium text-gray-500">Paying out {customerName}</p>
-      <RecordPayoutForm
-        contributionPlanId={contributionPlanId}
-        onSuccess={(receiptNumber) => {
-          router.push(`/admin/payouts/${receiptNumber}`);
-        }}
-      />
-      <button
-        type="button"
-        onClick={() => setIsOpen(false)}
-        className="mt-2 text-xs text-gray-500 hover:underline"
+      <Modal
+        isOpen={isOpen}
+        onClose={() => setIsOpen(false)}
+        title="Record payout"
+        panelClassName="sm:max-w-xl"
       >
-        Cancel
-      </button>
-    </div>
+        <div className="mb-5 border-b border-line pb-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-ink-subtle">Customer</p>
+          <p className="mt-1 text-lg font-semibold text-ink">{customerName}</p>
+          <p className="mt-1 text-sm text-ink-muted">Confirm the completed external payment, then close this savings period.</p>
+        </div>
+        <RecordPayoutForm
+          contributionPlanId={contributionPlanId}
+          dailyAmount={dailyAmount}
+          grossSavings={grossSavings}
+          onSuccess={(receiptNumber) => {
+            router.push(`${receiptBasePath}/${receiptNumber}`);
+          }}
+        />
+        <Button type="button" variant="ghost" className="mt-3 w-full" onClick={() => setIsOpen(false)}>
+          Cancel
+        </Button>
+      </Modal>
+    </>
   );
 }

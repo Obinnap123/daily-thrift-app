@@ -6,7 +6,7 @@
  * merge our custom fields into the library's types here.
  */
 import type { DefaultSession } from "next-auth";
-import type { Role } from "@/generated/prisma/enums";
+import type { Role } from "@/generated/prisma/client";
 
 declare module "next-auth" {
   interface Session {

@@ -66,7 +66,7 @@ export function SearchFilterBar({
           onChange={(event) => setQuery(event.target.value)}
           placeholder={placeholder}
           aria-label="Search"
-          className="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+          className="min-h-11 w-full rounded-xl border border-line-strong bg-surface px-3.5 py-2.5 text-sm text-ink shadow-sm placeholder:text-ink-subtle focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/25"
         />
       </div>
 
@@ -75,7 +75,7 @@ export function SearchFilterBar({
           aria-label="Filter by status"
           defaultValue={searchParams.get("status") ?? ""}
           onChange={(event) => pushParams({ status: event.target.value || undefined })}
-          className="rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm text-gray-900 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 sm:w-48"
+          className="min-h-11 rounded-xl border border-line-strong bg-surface px-3.5 py-2.5 text-sm text-ink shadow-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/25 sm:w-48"
         >
           <option value="">All statuses</option>
           {statusOptions.map((option) => (

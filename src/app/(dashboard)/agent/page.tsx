@@ -12,12 +12,10 @@ import { requireRole } from "@/lib/session";
 import { listCustomerProfiles } from "@/server/repositories/customer.repository";
 import { listActivePlansForAgent } from "@/server/repositories/contribution-plan.repository";
 import {
-  sumCollectedByAgent,
-  countByAgentAndDate,
   sumOutstandingForAgent,
-  getDailyTrackingSeries,
+  getDashboardContributionSummary,
 } from "@/server/repositories/contribution.repository";
-import { today, weekRange, monthRange } from "@/lib/date";
+import { today } from "@/lib/date";
 import { DashboardHeader } from "@/components/layout/DashboardHeader";
 import { DashboardNav } from "@/components/layout/DashboardNav";
 import { Card } from "@/components/ui/Card";
@@ -29,6 +27,8 @@ import Link from "next/link";
 
 const AGENT_NAV_LINKS = [
   { href: "/agent", label: "Overview" },
+  { href: "/agent/tracking", label: "Tracking" },
+  { href: "/agent/payouts", label: "Payouts" },
   { href: "/agent/collections", label: "Today's Collections" },
   { href: "/agent/reconciliation", label: "End-of-Day Report" },
 ];
@@ -38,23 +38,18 @@ export default async function AgentDashboardPage() {
 
   const [
     myCustomers,
-    todayCounts,
-    totalToday,
-    totalWeek,
-    totalMonth,
+    activity,
     outstanding,
     activePlansToday,
-    trackingSeries,
   ] = await Promise.all([
     listCustomerProfiles({ agentId: user.id }),
-    countByAgentAndDate(user.id, today()),
-    sumCollectedByAgent(user.id, { start: today(), end: today() }),
-    sumCollectedByAgent(user.id, weekRange()),
-    sumCollectedByAgent(user.id, monthRange()),
+    getDashboardContributionSummary(user.id),
     sumOutstandingForAgent(user.id),
     listActivePlansForAgent(user.id, today()),
-    getDailyTrackingSeries({ agentId: user.id }), // this agent's last 31 days
   ]);
+
+  const todayCounts = { visited: activity.visitedToday, collected: activity.collectedToday, missed: activity.missedToday };
+  const { totalToday, totalWeek, totalMonth, trackingSeries } = activity;
 
   const activeCustomerCount = myCustomers.filter((c) => c.user.isActive).length;
 
@@ -93,7 +88,7 @@ export default async function AgentDashboardPage() {
           <QuickPayButton customers={quickPayCustomers} isAdmin={false} label="Quick Pay" />
         </div>
 
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
           <StatCard label="Customers Assigned" value={activeCustomerCount} />
           <StatCard label="Visited Today" value={todayCounts.visited} />
           <StatCard label="Collected Today" value={todayCounts.collected} tone="green" />

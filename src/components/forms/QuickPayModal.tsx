@@ -30,6 +30,7 @@ import { quickPaySchema, type QuickPayInput } from "@/validations/contribution";
 import {
   recordQuickPayAction,
   getCustomerPlanForQuickPayAction,
+  searchQuickPayCustomersAction,
 } from "@/server/actions/contribution.actions";
 import { Modal } from "@/components/ui/Modal";
 import { Input } from "@/components/ui/Input";
@@ -217,6 +218,7 @@ export function QuickPayModal({
       <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4" noValidate>
         <CustomerSearchSelect
           options={customers}
+          onSearch={searchQuickPayCustomersAction}
           value={customerProfileId || null}
           onChange={handleCustomerChange}
           error={errors.customerProfileId?.message}

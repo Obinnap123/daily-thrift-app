@@ -68,9 +68,9 @@ export async function listPlansReadyForPayout(options?: {
   agentId?: string;
   search?: string;
 }) {
-  return prisma.contributionPlan.findMany({
+  const plans = await prisma.contributionPlan.findMany({
     where: {
-      status: "COMPLETED",
+      status: "ACTIVE",
       payout: null,
       ...(options?.agentId ? { customerProfile: { assignedAgentId: options.agentId } } : {}),
       ...(options?.search
@@ -88,7 +88,10 @@ export async function listPlansReadyForPayout(options?: {
       customerProfile: {
         include: { user: { select: { id: true, name: true, phone: true } } },
       },
+      _count: { select: { allocations: true } },
+      contributions: { where: { status: "COLLECTED" }, select: { amount: true } },
     },
     orderBy: { updatedAt: "asc" },
   });
+  return plans.filter((plan) => plan._count.allocations >= 2);
 }

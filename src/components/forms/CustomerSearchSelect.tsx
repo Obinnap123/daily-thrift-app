@@ -27,6 +27,7 @@ interface CustomerSearchSelectProps {
   onChange: (customerProfileId: string) => void;
   placeholder?: string;
   error?: string;
+  onSearch?: (query: string) => Promise<CustomerSearchOption[]>;
 }
 
 export function CustomerSearchSelect({
@@ -35,12 +36,15 @@ export function CustomerSearchSelect({
   onChange,
   placeholder = "Search by name, phone, or code…",
   error,
+  onSearch,
 }: CustomerSearchSelectProps) {
   const [query, setQuery] = useState("");
   const [isOpen, setIsOpen] = useState(false);
+  const [remoteOptions, setRemoteOptions] = useState<CustomerSearchOption[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const selected = options.find((option) => option.id === value) ?? null;
+  const selected = [...options, ...remoteOptions].find((option) => option.id === value) ?? null;
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -52,6 +56,20 @@ export function CustomerSearchSelect({
         (option.phone ?? "").toLowerCase().includes(q)
     );
   }, [options, query]);
+
+  useEffect(() => {
+    if (!isOpen || !onSearch) return;
+    let active = true;
+    const timer = setTimeout(() => {
+      setIsLoading(true);
+      void onSearch(query)
+        .then((result) => { if (active) setRemoteOptions(result); })
+        .finally(() => { if (active) setIsLoading(false); });
+    }, 250);
+    return () => { active = false; clearTimeout(timer); };
+  }, [isOpen, onSearch, query]);
+
+  const visibleOptions = onSearch ? remoteOptions : filtered;
 
   // Close the dropdown when clicking outside.
   useEffect(() => {
@@ -66,7 +84,7 @@ export function CustomerSearchSelect({
 
   return (
     <div ref={containerRef} className="relative flex flex-col gap-1.5">
-      <label htmlFor="customer-search-input" className="text-sm font-medium text-gray-700">
+      <label htmlFor="customer-search-input" className="text-sm font-medium text-ink">
         Customer
       </label>
       <input
@@ -81,10 +99,9 @@ export function CustomerSearchSelect({
         onChange={(event) => setQuery(event.target.value)}
         placeholder={placeholder}
         className={cn(
-          "w-full rounded-lg border px-3.5 py-2.5 text-sm text-gray-900 shadow-sm",
-          "placeholder:text-gray-400",
-          "focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500",
-          error ? "border-red-400" : "border-gray-300"
+          "min-h-11 w-full rounded-xl border bg-surface px-3.5 py-2.5 text-sm text-ink shadow-sm",
+          "placeholder:text-ink-subtle focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/25",
+          error ? "border-danger" : "border-line-strong"
         )}
         aria-invalid={!!error}
         role="combobox"
@@ -96,12 +113,14 @@ export function CustomerSearchSelect({
         <ul
           id="customer-search-listbox"
           role="listbox"
-          className="absolute top-full z-10 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+          className="absolute top-full z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-xl border border-line bg-surface-raised py-1 shadow-xl"
         >
-          {filtered.length === 0 ? (
-            <li className="px-3.5 py-2 text-sm text-gray-500">No customers match.</li>
+          {isLoading ? (
+            <li className="px-3.5 py-3 text-sm text-ink-muted" role="status">Searching customers…</li>
+          ) : visibleOptions.length === 0 ? (
+            <li className="px-3.5 py-3 text-sm text-ink-muted">No active customers match.</li>
           ) : (
-            filtered.map((option) => (
+            visibleOptions.map((option) => (
               <li key={option.id} role="option" aria-selected={option.id === value}>
                 <button
                   type="button"
@@ -111,12 +130,12 @@ export function CustomerSearchSelect({
                     setQuery("");
                   }}
                   className={cn(
-                    "flex w-full flex-col items-start px-3.5 py-2 text-left text-sm hover:bg-emerald-50",
-                    option.id === value && "bg-emerald-50"
+                    "flex min-h-12 w-full flex-col items-start px-3.5 py-2 text-left text-sm hover:bg-brand-soft",
+                    option.id === value && "bg-brand-soft"
                   )}
                 >
-                  <span className="font-medium text-gray-900">{option.name}</span>
-                  <span className="text-xs text-gray-500">
+                  <span className="font-medium text-ink">{option.name}</span>
+                  <span className="text-xs text-ink-muted">
                     {option.customerCode}
                     {option.phone ? ` · ${option.phone}` : ""}
                   </span>
@@ -127,7 +146,7 @@ export function CustomerSearchSelect({
         </ul>
       )}
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
     </div>
   );
 }

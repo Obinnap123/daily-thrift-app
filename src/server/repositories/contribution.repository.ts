@@ -10,7 +10,7 @@
  * place.
  */
 import { prisma } from "@/lib/prisma";
-import { toDateOnly, today, addDaysToDate } from "@/lib/date";
+import { toDateOnly, today, addDaysToDate, dateKey, weekRange, monthRange } from "@/lib/date";
 import { format } from "date-fns";
 
 /**
@@ -230,6 +230,84 @@ export interface DailyTrackingDay {
   collectedCount: number;
   /** Number of MISSED rows recorded on this day. */
   missedCount: number;
+}
+
+export interface DashboardContributionSummary {
+  totalToday: number;
+  totalWeek: number;
+  totalMonth: number;
+  collectedToday: number;
+  missedToday: number;
+  visitedToday: number;
+  trackingSeries: DailyTrackingDay[];
+}
+
+/** One grouped query powers every date-based dashboard metric and the
+ * rolling activity grid, avoiding several competing pool requests. */
+export async function getDashboardContributionSummary(agentId?: string): Promise<DashboardContributionSummary> {
+  const end = today();
+  const start = addDaysToDate(end, -30);
+  const weekStart = weekRange(end).start;
+  const monthStart = monthRange(end).start;
+  const rows = await prisma.contribution.groupBy({
+    by: ["collectionDate", "status"],
+    where: {
+      collectionDate: { gte: start, lte: end },
+      ...(agentId ? { collectedById: agentId } : {}),
+    },
+    _sum: { amount: true },
+    _count: { _all: true },
+    orderBy: { collectionDate: "asc" },
+  });
+
+  const todayKey = dateKey(end);
+  const buckets = new Map<string, { totalAmount: number; collectedCount: number; missedCount: number }>();
+  let totalToday = 0;
+  let totalWeek = 0;
+  let totalMonth = 0;
+  let collectedToday = 0;
+  let missedToday = 0;
+
+  for (const row of rows) {
+    const key = dateKey(row.collectionDate);
+    const count = row._count._all;
+    const amount = row.status === "COLLECTED" ? Number(row._sum.amount ?? 0) : 0;
+    const bucket = buckets.get(key) ?? { totalAmount: 0, collectedCount: 0, missedCount: 0 };
+    bucket.totalAmount += amount;
+    if (row.status === "COLLECTED") bucket.collectedCount += count;
+    else bucket.missedCount += count;
+    buckets.set(key, bucket);
+
+    if (row.status === "COLLECTED") {
+      if (key === todayKey) { totalToday += amount; collectedToday += count; }
+      if (row.collectionDate >= weekStart) totalWeek += amount;
+      if (row.collectionDate >= monthStart) totalMonth += amount;
+    } else if (key === todayKey) {
+      missedToday += count;
+    }
+  }
+
+  const trackingSeries = Array.from({ length: 31 }, (_, index): DailyTrackingDay => {
+    const date = addDaysToDate(start, index);
+    const key = dateKey(date);
+    const bucket = buckets.get(key) ?? { totalAmount: 0, collectedCount: 0, missedCount: 0 };
+    return {
+      date: key,
+      label: new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }).format(date),
+      dayOfMonth: String(date.getUTCDate()),
+      ...bucket,
+    };
+  });
+
+  return {
+    totalToday,
+    totalWeek,
+    totalMonth,
+    collectedToday,
+    missedToday,
+    visitedToday: collectedToday + missedToday,
+    trackingSeries,
+  };
 }
 
 /**

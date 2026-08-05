@@ -13,11 +13,13 @@ import { requireRole } from "@/lib/session";
 import { createAgent, updateAgent, setAgentActive } from "@/server/services/agent.service";
 import type { CreateAgentInput, EditAgentInput, SetAgentActiveInput } from "@/validations/auth";
 import { revalidatePath } from "next/cache";
+import { writeAuditLog } from "@/server/services/audit.service";
 
 export async function createAgentAction(input: CreateAgentInput) {
-  await requireRole("ADMIN");
+  const user = await requireRole("ADMIN");
 
   const result = await createAgent(input);
+  await writeAuditLog({ actorId: user.id, actorRole: user.role, action: "AGENT_CREATED", outcome: result.success ? "SUCCESS" : "FAILURE", entityType: "User", entityId: result.success ? result.data.id : undefined, summary: result.success ? `Agent ${input.name} created.` : result.message });
 
   if (result.success) {
     // Refresh the agents list page's cached data after a successful create.
@@ -28,9 +30,10 @@ export async function createAgentAction(input: CreateAgentInput) {
 }
 
 export async function updateAgentAction(input: EditAgentInput) {
-  await requireRole("ADMIN");
+  const user = await requireRole("ADMIN");
 
   const result = await updateAgent(input);
+  await writeAuditLog({ actorId: user.id, actorRole: user.role, action: "AGENT_UPDATED", outcome: result.success ? "SUCCESS" : "FAILURE", entityType: "User", entityId: input.id, summary: result.success ? "Agent details updated." : result.message });
 
   if (result.success) {
     revalidatePath("/admin/agents");
@@ -41,9 +44,10 @@ export async function updateAgentAction(input: EditAgentInput) {
 }
 
 export async function setAgentActiveAction(input: SetAgentActiveInput) {
-  await requireRole("ADMIN");
+  const user = await requireRole("ADMIN");
 
   const result = await setAgentActive(input);
+  await writeAuditLog({ actorId: user.id, actorRole: user.role, action: "AGENT_STATUS_CHANGED", outcome: result.success ? "SUCCESS" : "FAILURE", entityType: "User", entityId: input.id, summary: result.success ? `Agent status changed to ${input.isActive ? "active" : "inactive"}.` : result.message });
 
   if (result.success) {
     revalidatePath("/admin/agents");

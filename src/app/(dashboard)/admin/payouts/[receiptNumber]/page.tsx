@@ -54,13 +54,15 @@ export default async function PayoutReceiptPage({
               <Row label="Receipt Number" value={payout.receiptNumber} mono />
               <Row label="Customer" value={payout.customerProfile.user.name} />
               <Row label="Customer Code" value={payout.customerProfile.customerCode} mono />
-              <Row label="Total Savings Paid Out" value={`₦${Number(payout.totalSavings).toLocaleString()}`} />
+              <Row label="Gross Savings" value={`₦${Number(payout.grossSavings).toLocaleString()}`} />
+              <Row label="Company Commission" value={`₦${Number(payout.commissionAmount).toLocaleString()}`} />
+              <Row label="Customer Received" value={`₦${Number(payout.customerAmount).toLocaleString()}`} />
               <Row
                 label="Payout Method"
                 value={payout.payoutMethod === "CASH" ? "Cash" : "Bank Transfer"}
               />
               <Row label="Payout Date" value={format(payout.payoutDate, "dd MMMM yyyy")} />
-              <Row label="Approved By" value={payout.approvedBy.name} />
+              <Row label="Processed By" value={payout.approvedBy.name} />
               {payout.note && <Row label="Note" value={payout.note} />}
             </dl>
 

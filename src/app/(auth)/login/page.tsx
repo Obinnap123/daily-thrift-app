@@ -11,6 +11,7 @@
  */
 import Link from "next/link";
 import { Card } from "@/components/ui/Card";
+import { AuthBrandWash } from "@/components/auth/AuthLayout";
 
 const ROLE_LOGIN_LINKS = [
   {
@@ -46,31 +47,34 @@ export default async function LoginChooserPage({
   const query = callbackUrl ? `?callbackUrl=${encodeURIComponent(callbackUrl)}` : "";
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
-      <div className="w-full max-w-md">
+    <main className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-canvas px-4 py-10">
+      <AuthBrandWash />
+      <div className="relative w-full max-w-md">
         <div className="mb-8 text-center">
-          <h1 className="text-2xl font-bold text-gray-900">Davchuks Daily Thrift</h1>
-          <p className="mt-1 text-sm text-gray-500">Choose how you&apos;d like to sign in</p>
+          <span className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-2xl bg-brand-solid text-lg font-black text-white shadow-lg">D</span>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand">Secure savings operations</p>
+          <h1 className="mt-2 text-2xl font-bold tracking-tight text-ink">Davchuks Daily Thrift</h1>
+          <p className="mt-1 text-sm text-ink-muted">Choose your workspace to continue</p>
         </div>
         <Card className="flex flex-col gap-3">
           {ROLE_LOGIN_LINKS.map(({ href, label, description, icon: Icon }) => (
             <Link
               key={href}
               href={`${href}${query}`}
-              className="flex items-center gap-4 rounded-lg border border-gray-200 p-4 text-left transition-colors hover:border-emerald-400 hover:bg-emerald-50"
+              className="flex min-h-20 items-center gap-4 rounded-xl border border-line p-4 text-left transition-colors hover:border-brand hover:bg-brand-soft focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"
             >
-              <span className="flex h-10 w-10 flex-none items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+              <span className="flex h-11 w-11 flex-none items-center justify-center rounded-xl bg-brand-soft text-brand">
                 <Icon />
               </span>
               <span>
-                <span className="block text-sm font-semibold text-gray-900">{label}</span>
-                <span className="block text-xs text-gray-500">{description}</span>
+                <span className="block text-sm font-semibold text-ink">{label}</span>
+                <span className="mt-0.5 block text-xs leading-relaxed text-ink-muted">{description}</span>
               </span>
             </Link>
           ))}
         </Card>
       </div>
-    </div>
+    </main>
   );
 }
 

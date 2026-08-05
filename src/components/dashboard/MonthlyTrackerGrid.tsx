@@ -15,7 +15,7 @@
  */
 import type { DailyTrackingDay } from "@/server/repositories/contribution.repository";
 import { cn } from "@/lib/utils";
-import { format } from "date-fns";
+import { dateKey, today } from "@/lib/date";
 
 interface MonthlyTrackerGridProps {
   title: string;
@@ -24,7 +24,7 @@ interface MonthlyTrackerGridProps {
 }
 
 export function MonthlyTrackerGrid({ title, subtitle, series }: MonthlyTrackerGridProps) {
-  const todayKey = format(new Date(), "yyyy-MM-dd");
+  const todayKey = dateKey(today());
 
   const totalCollectedDays = series.filter((day) => day.collectedCount > 0).length;
   const totalMissedDays = series.filter((day) => day.missedCount > 0 && day.collectedCount === 0).length;
@@ -34,15 +34,15 @@ export function MonthlyTrackerGrid({ title, subtitle, series }: MonthlyTrackerGr
     <div>
       <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
         <div>
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500">{title}</h3>
-          {subtitle && <p className="text-xs text-gray-400">{subtitle}</p>}
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-ink-muted">{title}</h3>
+          {subtitle && <p className="text-xs text-ink-subtle">{subtitle}</p>}
         </div>
-        <p className="text-xs text-gray-500">
-          <span className="font-medium text-emerald-700">{totalCollectedDays} active</span>
+        <p className="text-xs text-ink-muted">
+          <span className="font-medium text-brand">{totalCollectedDays} active</span>
           {" · "}
-          <span className="font-medium text-red-700">{totalMissedDays} missed-only</span>
+          <span className="font-medium text-danger">{totalMissedDays} missed-only</span>
           {" · "}
-          <span className="font-medium text-gray-900">₦{totalAmount.toLocaleString()} total</span>
+          <span className="font-medium text-ink">₦{totalAmount.toLocaleString()} total</span>
         </p>
       </div>
 
@@ -53,10 +53,10 @@ export function MonthlyTrackerGrid({ title, subtitle, series }: MonthlyTrackerGr
           const hasMissed = day.missedCount > 0;
 
           const toneClass = hasCollected
-            ? "bg-emerald-100 text-emerald-800 border-emerald-200"
+            ? "border-emerald-500/30 bg-brand-soft text-brand-ink"
             : hasMissed
-              ? "bg-red-100 text-red-700 border-red-200"
-              : "bg-gray-50 text-gray-400 border-gray-200";
+              ? "border-red-500/30 bg-danger-soft text-danger"
+              : "border-line bg-surface-muted text-ink-subtle";
 
           return (
             <div
@@ -71,7 +71,7 @@ export function MonthlyTrackerGrid({ title, subtitle, series }: MonthlyTrackerGr
               className={cn(
                 "flex aspect-square flex-col items-center justify-center rounded-md border text-[10px] font-medium",
                 toneClass,
-                isToday && "ring-2 ring-offset-1 ring-emerald-600"
+                isToday && "ring-2 ring-brand ring-offset-2 ring-offset-surface"
               )}
             >
               <span className="leading-none">{day.dayOfMonth}</span>
@@ -80,11 +80,11 @@ export function MonthlyTrackerGrid({ title, subtitle, series }: MonthlyTrackerGr
         })}
       </div>
 
-      <div className="mt-3 flex flex-wrap gap-3 text-[11px] text-gray-500">
+      <div className="mt-3 flex flex-wrap gap-3 text-[11px] text-ink-muted">
         <LegendDot toneClass="bg-emerald-100 border-emerald-200" label="Collected" />
         <LegendDot toneClass="bg-red-100 border-red-200" label="Missed" />
         <LegendDot toneClass="bg-gray-50 border-gray-200" label="No activity" />
-        <LegendDot toneClass="bg-white border-emerald-600 ring-1 ring-emerald-600" label="Today" />
+        <LegendDot toneClass="bg-surface border-brand ring-1 ring-brand" label="Today" />
       </div>
     </div>
   );

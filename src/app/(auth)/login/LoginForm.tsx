@@ -67,6 +67,7 @@ export function LoginForm({ role }: LoginFormProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [formError, setFormError] = useState<string | null>(null);
+  const [isRedirecting, setIsRedirecting] = useState(false);
   const fieldConfig = ROLE_FIELD_CONFIG[role];
 
   const {
@@ -75,6 +76,7 @@ export function LoginForm({ role }: LoginFormProps) {
     formState: { errors, isSubmitting },
   } = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),
+    defaultValues: { portalRole: role.toUpperCase() as LoginInput["portalRole"] },
   });
 
   async function onSubmit(data: LoginInput) {
@@ -91,14 +93,19 @@ export function LoginForm({ role }: LoginFormProps) {
       return;
     }
 
-    const callbackUrl = searchParams.get("callbackUrl") ?? "/";
-    router.push(callbackUrl);
-    router.refresh();
+    setIsRedirecting(true);
+    const roleHome = `/${role}`;
+    const requested = searchParams.get("callbackUrl");
+    const callbackUrl = requested?.startsWith(`${roleHome}/`) || requested === roleHome
+      ? requested
+      : roleHome;
+    router.replace(callbackUrl);
   }
 
   return (
     <Card>
-      <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4" noValidate>
+      <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4" noValidate aria-busy={isSubmitting || isRedirecting}>
+        <input type="hidden" {...register("portalRole")} />
         <Input
           label={fieldConfig.label}
           type={fieldConfig.type}
@@ -116,16 +123,17 @@ export function LoginForm({ role }: LoginFormProps) {
         />
 
         {formError && (
-          <p role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+          <p role="alert" className="rounded-xl bg-danger-soft px-3 py-2 text-sm text-danger">
             {formError}
           </p>
         )}
 
-        <Button type="submit" isLoading={isSubmitting} className="mt-2 w-full">
-          Sign in
+        <Button type="submit" isLoading={isSubmitting || isRedirecting} className="mt-2 w-full">
+          {isRedirecting ? "Opening your dashboard…" : isSubmitting ? "Signing in…" : "Sign in"}
         </Button>
 
-        <p className="text-center text-xs text-gray-500">{fieldConfig.hint}</p>
+        <p className="text-center text-xs text-ink-muted">{fieldConfig.hint}</p>
+        {(isSubmitting || isRedirecting) && <p className="sr-only" role="status" aria-live="polite">{isRedirecting ? "Opening your dashboard" : "Signing you in"}</p>}
       </form>
     </Card>
   );

@@ -34,6 +34,7 @@ import type {
 } from "@/validations/customer";
 import { fail } from "@/lib/action-result";
 import { revalidatePath } from "next/cache";
+import { writeAuditLog } from "@/server/services/audit.service";
 
 export async function registerCustomerAction(input: RegisterCustomerInput) {
   const user = await requireRole(["ADMIN", "AGENT"]);
@@ -44,6 +45,7 @@ export async function registerCustomerAction(input: RegisterCustomerInput) {
     user.role === "AGENT" ? { ...input, assignedAgentId: user.id } : input;
 
   const result = await registerCustomer(scopedInput, user.id);
+  await writeAuditLog({ actorId: user.id, actorRole: user.role, action: "CUSTOMER_REGISTERED", outcome: result.success ? "SUCCESS" : "FAILURE", entityType: "CustomerProfile", summary: result.success ? `Customer ${input.fullName} registered.` : result.message });
 
   if (result.success) {
     revalidatePath("/admin/customers");
@@ -57,6 +59,7 @@ export async function reassignCustomerAgentAction(input: ReassignAgentInput) {
   const user = await requireRole("ADMIN");
 
   const result = await reassignCustomerAgent(input, user.id);
+  await writeAuditLog({ actorId: user.id, actorRole: user.role, action: "CUSTOMER_REASSIGNED", outcome: result.success ? "SUCCESS" : "FAILURE", entityType: "CustomerProfile", entityId: input.customerProfileId, summary: result.success ? "Customer agent assignment changed." : result.message });
 
   if (result.success) {
     revalidatePath("/admin/customers");
@@ -82,6 +85,7 @@ export async function updateCustomerAction(input: EditCustomerInput) {
   }
 
   const result = await updateCustomer(input);
+  await writeAuditLog({ actorId: user.id, actorRole: user.role, action: "CUSTOMER_UPDATED", outcome: result.success ? "SUCCESS" : "FAILURE", entityType: "CustomerProfile", entityId: input.customerProfileId, summary: result.success ? "Customer details updated." : result.message });
 
   if (result.success) {
     revalidatePath("/admin/customers");
@@ -123,6 +127,7 @@ export async function uploadCustomerPhotoAction(formData: FormData) {
   }
 
   const result = await uploadCustomerPassportPhoto(customerProfileId, file);
+  await writeAuditLog({ actorId: user.id, actorRole: user.role, action: "CUSTOMER_PHOTO_UPDATED", outcome: result.success ? "SUCCESS" : "FAILURE", entityType: "CustomerProfile", entityId: customerProfileId, summary: result.success ? "Customer passport photo updated." : result.message });
 
   if (result.success) {
     revalidatePath("/admin/customers");
@@ -142,6 +147,7 @@ export async function bulkAssignCustomersAction(input: BulkAssignCustomersInput)
   const user = await requireRole("ADMIN");
 
   const result = await bulkAssignCustomersToAgent(input, user.id);
+  await writeAuditLog({ actorId: user.id, actorRole: user.role, action: "CUSTOMERS_BULK_ASSIGNED", outcome: result.success ? "SUCCESS" : "FAILURE", entityType: "User", entityId: input.agentId, summary: result.success ? `${result.data.assignedCount} customers assigned.` : result.message });
 
   if (result.success) {
     revalidatePath("/admin/agents");
@@ -158,9 +164,10 @@ export async function bulkAssignCustomersAction(input: BulkAssignCustomersInput)
  * safety check; this action only enforces WHO may attempt it.
  */
 export async function deleteCustomerAction(input: DeleteCustomerInput) {
-  await requireRole("ADMIN");
+  const user = await requireRole("ADMIN");
 
   const result = await deleteCustomer(input);
+  await writeAuditLog({ actorId: user.id, actorRole: user.role, action: "CUSTOMER_DELETED", outcome: result.success ? "SUCCESS" : "FAILURE", entityType: "CustomerProfile", entityId: input.customerProfileId, summary: result.success ? "Unused customer registration deleted." : result.message });
 
   if (result.success) {
     revalidatePath("/admin/customers");

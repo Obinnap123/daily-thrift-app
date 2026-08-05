@@ -12,15 +12,11 @@
 import { requireRole } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import {
-  sumCollectedSystemWide,
-  countMissedSystemWide,
   listRecentContributionsSystemWide,
-  getDailyTrackingSeries,
+  getDashboardContributionSummary,
 } from "@/server/repositories/contribution.repository";
 import { listPlansReadyForPayout } from "@/server/repositories/contribution-plan.repository";
 import { listRecentAgentAssignmentLogs } from "@/server/repositories/agent.repository";
-import { listCustomerProfiles } from "@/server/repositories/customer.repository";
-import { today, weekRange, monthRange } from "@/lib/date";
 import { DashboardHeader } from "@/components/layout/DashboardHeader";
 import { DashboardNav } from "@/components/layout/DashboardNav";
 import { Card } from "@/components/ui/Card";
@@ -30,60 +26,54 @@ import { PayoutRow } from "@/components/forms/PayoutRow";
 import { QuickPayButton } from "@/components/forms/QuickPayButton";
 import { format } from "date-fns";
 import Link from "next/link";
+import { getFinancialOverview } from "@/server/repositories/financial.repository";
 
 const ADMIN_NAV_LINKS = [
   { href: "/admin", label: "Overview" },
   { href: "/admin/agents", label: "Agents" },
   { href: "/admin/customers", label: "Customers" },
+  { href: "/admin/tracking", label: "Tracking" },
   { href: "/admin/payouts", label: "Payouts" },
   { href: "/admin/reconciliations", label: "Reconciliations" },
   { href: "/admin/reports", label: "Reports" },
+  { href: "/admin/audit", label: "Audit Log" },
+  { href: "/admin/settings", label: "Settings" },
 ];
 
 export default async function AdminDashboardPage() {
   await requireRole("ADMIN");
 
   const [
-    totalCustomers,
-    activeCustomers,
-    totalAgents,
-    totalToday,
-    totalWeek,
-    totalMonth,
+    userGroups,
+    activity,
     dueForPayout,
-    missedToday,
     recentTransactions,
     recentAgentActivity,
-    trackingSeries,
-    allCustomers,
+    financial,
   ] = await Promise.all([
-    prisma.user.count({ where: { role: "CUSTOMER" } }),
-    prisma.user.count({ where: { role: "CUSTOMER", isActive: true } }),
-    prisma.user.count({ where: { role: "AGENT" } }),
-    sumCollectedSystemWide({ start: today(), end: today() }),
-    sumCollectedSystemWide(weekRange()),
-    sumCollectedSystemWide(monthRange()),
+    prisma.user.groupBy({ by: ["role", "isActive"], _count: { _all: true } }),
+    getDashboardContributionSummary(),
     listPlansReadyForPayout(),
-    countMissedSystemWide(today()),
     listRecentContributionsSystemWide(8),
     listRecentAgentAssignmentLogs(8),
-    getDailyTrackingSeries(), // system-wide, last 31 days
-    listCustomerProfiles(), // every customer — Quick Pay modal's searchable dropdown
+    getFinancialOverview(),
   ]);
 
-  const quickPayCustomers = allCustomers.map((customer) => ({
-    id: customer.id,
-    name: customer.user.name,
-    phone: customer.user.phone,
-    customerCode: customer.customerCode,
-  }));
+  const totalCustomers = userGroups.filter((row) => row.role === "CUSTOMER").reduce((sum, row) => sum + row._count._all, 0);
+  const activeCustomers = userGroups.find((row) => row.role === "CUSTOMER" && row.isActive)?._count._all ?? 0;
+  const totalAgents = userGroups.filter((row) => row.role === "AGENT").reduce((sum, row) => sum + row._count._all, 0);
+  const { totalToday, totalWeek, totalMonth, missedToday, trackingSeries } = activity;
 
   return (
     <div className="flex min-h-screen flex-col">
       <DashboardHeader title="Admin Dashboard" />
       <DashboardNav links={ADMIN_NAV_LINKS} />
       <main className="flex-1 space-y-6 p-4 sm:p-6">
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
+          <StatCard label="Lifetime Collections" value={`₦${financial.lifetimeCollections.toLocaleString()}`} />
+          <StatCard label="Active Customer Savings" value={`₦${financial.activeSavings.toLocaleString()}`} tone="amber" />
+          <StatCard label="Paid to Customers" value={`₦${financial.paidToCustomers.toLocaleString()}`} tone="green" />
+          <StatCard label="Commission Earned" value={`₦${financial.commissionEarned.toLocaleString()}`} tone="green" />
           <StatCard label="Total Customers" value={totalCustomers} />
           <StatCard label="Active Customers" value={activeCustomers} tone="green" />
           <StatCard label="Total Agents" value={totalAgents} />
@@ -97,7 +87,7 @@ export default async function AdminDashboardPage() {
         <Card>
           <h2 className="mb-3 text-base font-semibold text-gray-900">Quick actions</h2>
           <div className="flex flex-wrap gap-3">
-            <QuickPayButton customers={quickPayCustomers} isAdmin label="Quick Pay" />
+            <QuickPayButton isAdmin label="Quick Pay" />
             <Link
               href="/admin/agents/new"
               className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"

@@ -19,7 +19,21 @@ import { PrismaPg } from "@prisma/adapter-pg";
 const globalForPrisma = global as unknown as { prisma: PrismaClient };
 
 function createPrismaClient() {
-  const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+  const adapter = new PrismaPg({
+    connectionString: process.env.DATABASE_URL,
+    // Supabase session mode currently allows 15 clients. Keep this process's
+    // pool deliberately small so Next.js workers/reloads cannot consume the
+    // entire allowance. Queries wait briefly for a pooled connection instead
+    // of opening up to node-postgres's default of ten per process.
+    max: 3,
+    // Supabase's shared pooler can queue briefly during local hot reloads.
+    // Five seconds proved too short for the dashboard's parallel query burst;
+    // 30 seconds keeps failures bounded without rejecting healthy queued work.
+    connectionTimeoutMillis: 30_000,
+    idleTimeoutMillis: 10_000,
+    maxLifetimeSeconds: 60,
+    application_name: "davchuks-daily-thrift",
+  });
 
   return new PrismaClient({
     adapter,

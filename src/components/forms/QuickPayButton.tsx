@@ -12,7 +12,7 @@ import { QuickPayModal } from "@/components/forms/QuickPayModal";
 import type { CustomerSearchOption } from "@/components/forms/CustomerSearchSelect";
 
 interface QuickPayButtonProps {
-  customers: CustomerSearchOption[];
+  customers?: CustomerSearchOption[];
   isAdmin: boolean;
   initialCustomerProfileId?: string;
   /** Override the button label (e.g. "Quick Record Payment" on the Customer Tracking page). */
@@ -25,7 +25,7 @@ interface QuickPayButtonProps {
 }
 
 export function QuickPayButton({
-  customers,
+  customers = [],
   isAdmin,
   initialCustomerProfileId,
   label = "Quick Pay",

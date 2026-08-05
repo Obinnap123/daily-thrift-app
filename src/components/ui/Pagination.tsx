@@ -36,13 +36,13 @@ export function Pagination({ currentPage, totalPages, searchParams, basePath }: 
   return (
     <nav
       aria-label="Pagination"
-      className="flex items-center justify-between gap-4 border-t border-gray-200 px-4 py-3 sm:px-6"
+      className="flex flex-col items-stretch justify-between gap-3 border-t border-line px-4 py-3 min-[380px]:flex-row min-[380px]:items-center sm:px-6"
     >
-      <p className="text-sm text-gray-500">
-        Page <span className="font-medium text-gray-900">{currentPage}</span> of{" "}
-        <span className="font-medium text-gray-900">{totalPages}</span>
+      <p className="text-center text-sm text-ink-muted min-[380px]:text-left">
+        Page <span className="font-medium text-ink">{currentPage}</span> of{" "}
+        <span className="font-medium text-ink">{totalPages}</span>
       </p>
-      <div className="flex gap-2">
+      <div className="grid grid-cols-2 gap-2">
         <PageLink
           href={buildHref(basePath, searchParams, currentPage - 1)}
           disabled={!canGoPrevious}
@@ -68,7 +68,7 @@ function PageLink({
 }) {
   if (disabled) {
     return (
-      <span className="cursor-not-allowed rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-400">
+      <span className="inline-flex min-h-11 cursor-not-allowed items-center justify-center rounded-xl border border-line px-3 py-1.5 text-sm text-ink-subtle">
         {children}
       </span>
     );
@@ -77,7 +77,7 @@ function PageLink({
     <Link
       href={href}
       className={cn(
-        "rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+        "inline-flex min-h-11 items-center justify-center rounded-xl border border-line-strong px-3 py-1.5 text-sm text-ink hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"
       )}
     >
       {children}

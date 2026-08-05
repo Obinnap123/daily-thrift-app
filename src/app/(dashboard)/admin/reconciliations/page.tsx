@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Pagination } from "@/components/ui/Pagination";
 import { ReviewReconciliationButtons } from "@/components/forms/ReviewReconciliationButtons";
 import { format } from "date-fns";
+import Link from "next/link";
 
 const ADMIN_NAV_LINKS = [
   { href: "/admin", label: "Overview" },
@@ -56,29 +57,31 @@ export default async function AdminReconciliationsPage({
           <h2 className="text-lg font-semibold text-gray-900">
             Daily Collection Reports ({totalCount})
           </h2>
-          <div className="flex gap-1 text-sm">
+          <nav aria-label="Filter reconciliation reports by status" className="flex flex-wrap gap-2 text-sm">
             {(["SUBMITTED", "APPROVED", "REJECTED"] as const).map((option) => (
-              <a
+              <Link
                 key={option}
                 href={`/admin/reconciliations?status=${option}`}
-                className={`rounded-lg px-3 py-1.5 font-medium ${
+                aria-current={status === option ? "page" : undefined}
+                className={`inline-flex min-h-11 items-center rounded-xl px-3 py-2 font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand sm:min-h-0 ${
                   status === option
-                    ? "bg-emerald-600 text-white"
-                    : "border border-gray-300 text-gray-700 hover:bg-gray-50"
+                    ? "bg-brand-solid text-white hover:bg-brand-solid-hover"
+                    : "border border-line-strong bg-surface text-ink-muted hover:bg-surface-hover hover:text-ink"
                 }`}
               >
                 {option}
-              </a>
+              </Link>
             ))}
-            <a
+            <Link
               href="/admin/reconciliations"
-              className={`rounded-lg px-3 py-1.5 font-medium ${
-                !status ? "bg-emerald-600 text-white" : "border border-gray-300 text-gray-700 hover:bg-gray-50"
+              aria-current={!status ? "page" : undefined}
+              className={`inline-flex min-h-11 items-center rounded-xl px-3 py-2 font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand sm:min-h-0 ${
+                !status ? "bg-brand-solid text-white hover:bg-brand-solid-hover" : "border border-line-strong bg-surface text-ink-muted hover:bg-surface-hover hover:text-ink"
               }`}
             >
               All
-            </a>
-          </div>
+            </Link>
+          </nav>
         </div>
 
         <Card className="overflow-x-auto p-0">
