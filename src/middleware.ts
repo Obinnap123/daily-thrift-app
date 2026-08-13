@@ -72,5 +72,7 @@ export default auth((req) => {
 // Only run middleware on real pages — skip static files, images, and
 // Next.js internals for performance.
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.png$).*)"],
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|sw.js|manifest.webmanifest|offline.html|icons/|.*\\.png$).*)",
+  ],
 };

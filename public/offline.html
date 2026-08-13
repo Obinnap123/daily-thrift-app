@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#047857" />
+    <title>You're offline | Davchuks Daily Thrift</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --canvas: #f4f7f5;
+        --surface: #ffffff;
+        --ink: #17201b;
+        --muted: #5d6b63;
+        --line: #d8e2dc;
+        --brand: #047857;
+        --brand-hover: #065f46;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          color-scheme: dark;
+          --canvas: #09110d;
+          --surface: #111b16;
+          --ink: #f1f7f3;
+          --muted: #b2c0b8;
+          --line: #2c3d34;
+          --brand: #059669;
+          --brand-hover: #047857;
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        min-width: 320px;
+        min-height: 100dvh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background: var(--canvas);
+        color: var(--ink);
+        font-family: Arial, Helvetica, sans-serif;
+      }
+
+      main {
+        width: min(100%, 440px);
+        padding: 32px;
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        background: var(--surface);
+        text-align: center;
+      }
+
+      img {
+        width: 64px;
+        height: 64px;
+        margin-bottom: 20px;
+        border-radius: 16px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(1.5rem, 5vw, 2rem);
+        line-height: 1.2;
+      }
+
+      p {
+        margin: 12px 0 24px;
+        color: var(--muted);
+        font-size: 1rem;
+        line-height: 1.6;
+      }
+
+      button {
+        min-height: 48px;
+        width: 100%;
+        border: 0;
+        border-radius: 12px;
+        padding: 12px 18px;
+        background: var(--brand);
+        color: #ffffff;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: var(--brand-hover);
+      }
+
+      button:focus-visible {
+        outline: 3px solid var(--ink);
+        outline-offset: 3px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="/icons/icon-192.png" alt="" aria-hidden="true" />
+      <h1>You're offline</h1>
+      <p>
+        Davchuks needs an internet connection to securely load records and
+        complete financial actions. Reconnect, then try again.
+      </p>
+      <button type="button" onclick="window.location.reload()">
+        Try again
+      </button>
+    </main>
+  </body>
+</html>
