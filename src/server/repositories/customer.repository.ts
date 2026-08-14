@@ -136,7 +136,14 @@ export async function findCustomerProfileByIdNumber(idNumber: string) {
 export async function findCustomerProfileWithUserId(customerProfileId: string) {
   return prisma.customerProfile.findUnique({
     where: { id: customerProfileId },
-    select: { id: true, userId: true, idNumber: true, assignedAgentId: true },
+    select: {
+      id: true,
+      userId: true,
+      idNumber: true,
+      assignedAgentId: true,
+      passportPhotoUrl: true,
+      user: { select: { phone: true } },
+    },
   });
 }
 

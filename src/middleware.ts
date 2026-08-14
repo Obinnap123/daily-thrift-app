@@ -4,9 +4,7 @@
  * Runs on every request (except static assets) and:
  *  1. Redirects unauthenticated users away from any /admin, /agent, /customer
  *     dashboard route, back to /login.
- *  2. Redirects an already-authenticated user away from /login to their
- *     role-appropriate dashboard.
- *  3. Enforces that a role can only access its own dashboard section
+ *  2. Enforces that a role can only access its own dashboard section
  *     (e.g. a CUSTOMER cannot browse to /admin by guessing the URL).
  *
  * Fine-grained per-page authorization (e.g. "can this Agent edit this
@@ -36,7 +34,6 @@ export default auth((req) => {
   const isLoggedIn = !!req.auth;
   const role = req.auth?.user?.role;
 
-  const isOnLoginPage = nextUrl.pathname.startsWith("/login");
   const isOnAdminSection = nextUrl.pathname.startsWith("/admin");
   const isOnAgentSection = nextUrl.pathname.startsWith("/agent");
   const isOnCustomerSection = nextUrl.pathname.startsWith("/customer");
@@ -48,12 +45,7 @@ export default auth((req) => {
     return NextResponse.redirect(loginUrl);
   }
 
-  // 2. Already logged in but visiting /login -> bounce to their home dashboard.
-  if (isLoggedIn && isOnLoginPage) {
-    return NextResponse.redirect(new URL(ROLE_HOME[role ?? ""] ?? "/", nextUrl.origin));
-  }
-
-  // 3. Logged in but role doesn't match the section they're trying to access.
+  // 2. Logged in but role doesn't match the section they're trying to access.
   if (isLoggedIn) {
     if (isOnAdminSection && role !== "ADMIN") {
       return NextResponse.redirect(new URL(ROLE_HOME[role ?? ""] ?? "/", nextUrl.origin));

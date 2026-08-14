@@ -22,6 +22,7 @@ import {
 } from "@/validations/contribution";
 import { findActivePlanForCustomer } from "@/server/repositories/contribution-plan.repository";
 import { ok, fail, type ActionResult } from "@/lib/action-result";
+import { isActivePlanUniqueConflict } from "@/lib/prisma-errors";
 
 /** Computed savings-progress snapshot for a single ContributionPlan. */
 export interface PlanProgress {
@@ -96,16 +97,26 @@ export async function createContributionPlan(
     new Date(start.getTime() + durationDays * 24 * 60 * 60 * 1000)
   );
 
-  const plan = await prisma.contributionPlan.create({
-    data: {
-      customerProfileId,
-      dailyAmount,
-      durationDays,
-      startDate: start,
-      expectedMaturityDate,
-      nextCoverageDate: start,
-    },
-  });
+  let plan;
+  try {
+    plan = await prisma.contributionPlan.create({
+      data: {
+        customerProfileId,
+        dailyAmount,
+        durationDays,
+        startDate: start,
+        expectedMaturityDate,
+        nextCoverageDate: start,
+      },
+    });
+  } catch (error) {
+    // The earlier lookup gives a fast, friendly response in the normal case;
+    // the database constraint closes the small race between lookup and create.
+    if (isActivePlanUniqueConflict(error)) {
+      return fail("This customer already has an active savings plan.");
+    }
+    throw error;
+  }
 
   return ok({ contributionPlanId: plan.id });
 }

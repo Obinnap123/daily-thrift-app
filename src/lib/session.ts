@@ -15,7 +15,8 @@ import type { Role } from "@/generated/prisma/client";
 /** Returns the current session's user, or null if not logged in. */
 export async function getCurrentUser() {
   const session = await auth();
-  return session?.user ?? null;
+  if (!session?.user || session.user.revoked) return null;
+  return session.user;
 }
 
 /**

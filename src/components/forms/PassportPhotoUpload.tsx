@@ -14,20 +14,21 @@
  * URL.createObjectURL) before upload, and falls back to the existing saved
  * photo (or a placeholder) otherwise.
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { uploadCustomerPhotoAction } from "@/server/actions/customer.actions";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/providers/ToastProvider";
+import { CustomerPhoto } from "@/components/customer/CustomerPhoto";
 
 interface PassportPhotoUploadProps {
   customerProfileId: string;
-  currentPhotoUrl: string | null;
+  hasCurrentPhoto: boolean;
 }
 
 export function PassportPhotoUpload({
   customerProfileId,
-  currentPhotoUrl,
+  hasCurrentPhoto,
 }: PassportPhotoUploadProps) {
   const router = useRouter();
   const { showToast } = useToast();
@@ -36,6 +37,12 @@ export function PassportPhotoUpload({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
 
   function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
@@ -73,24 +80,24 @@ export function PassportPhotoUpload({
     router.refresh();
   }
 
-  const displayUrl = previewUrl ?? currentPhotoUrl;
-
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-4">
-        {displayUrl ? (
-          // Locally-stored upload, plain <img> is intentional here (no
-          // next/image remote-loader config needed for same-origin files).
+        {previewUrl ? (
+          // The object URL exists only in this browser and is revoked when it
+          // is replaced or the form unmounts.
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={displayUrl}
-            alt="Passport photo"
-            className="h-24 w-24 rounded-lg border border-gray-200 object-cover"
+            src={previewUrl}
+            alt="Selected passport photo preview"
+            className="h-24 w-24 rounded-xl border border-line object-cover"
           />
         ) : (
-          <div className="flex h-24 w-24 items-center justify-center rounded-lg border border-dashed border-gray-300 text-xs text-gray-400">
-            No photo
-          </div>
+          <CustomerPhoto
+            customerProfileId={customerProfileId}
+            hasPhoto={hasCurrentPhoto}
+            alt="Customer passport photo"
+          />
         )}
 
         <div className="flex flex-col gap-2">
@@ -100,14 +107,14 @@ export function PassportPhotoUpload({
             accept="image/jpeg,image/png,image/webp"
             onChange={handleFileChange}
             aria-label="Choose passport photo"
-            className="text-sm text-gray-700"
+            className="max-w-full text-sm text-ink"
           />
-          <p className="text-xs text-gray-500">JPEG, PNG, or WEBP. Max 5MB.</p>
+          <p className="text-xs text-ink-muted">JPEG, PNG, or WEBP. Max 5MB.</p>
         </div>
       </div>
 
       {formError && (
-        <p role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">
           {formError}
         </p>
       )}
@@ -120,7 +127,7 @@ export function PassportPhotoUpload({
         disabled={!selectedFile}
         className="w-fit"
       >
-        {currentPhotoUrl ? "Replace Photo" : "Upload Photo"}
+        {hasCurrentPhoto ? "Replace Photo" : "Upload Photo"}
       </Button>
     </div>
   );

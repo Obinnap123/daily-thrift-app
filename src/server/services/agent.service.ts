@@ -106,7 +106,16 @@ export async function updateAgent(input: EditAgentInput): Promise<ActionResult<{
 
   const agent = await prisma.user.update({
     where: { id },
-    data: { name, email, phone: normalizedPhone },
+    data: {
+      name,
+      email,
+      phone: normalizedPhone,
+      // Email is this role's login identifier. Changing it must revoke JWTs
+      // issued under the previous credential identity.
+      ...(email !== existingAgent.email
+        ? { sessionVersion: { increment: 1 } }
+        : {}),
+    },
     select: { id: true },
   });
 
@@ -147,7 +156,12 @@ export async function setAgentActive(
 
   const agent = await prisma.user.update({
     where: { id },
-    data: { isActive },
+    data: {
+      isActive,
+      // Increment on either deactivation or reactivation. Reactivating the
+      // account must not make an older, previously revoked JWT valid again.
+      sessionVersion: { increment: 1 },
+    },
     select: { id: true, isActive: true },
   });
 

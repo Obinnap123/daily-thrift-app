@@ -34,6 +34,8 @@ export const authConfig: NextAuthConfig = {
       if (user) {
         token.id = user.id as string;
         token.role = user.role;
+        token.sessionVersion = user.sessionVersion;
+        token.revoked = false;
       }
       return token;
     },
@@ -42,6 +44,9 @@ export const authConfig: NextAuthConfig = {
       if (session.user) {
         session.user.id = token.id as string;
         session.user.role = token.role as Role;
+        session.user.sessionVersion =
+          typeof token.sessionVersion === "number" ? token.sessionVersion : -1;
+        session.user.revoked = token.revoked !== false;
       }
       return session;
     },

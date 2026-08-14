@@ -23,6 +23,7 @@ import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { format } from "date-fns";
 import { MonthlyTrackingSheets } from "@/components/dashboard/MonthlyTrackingSheets";
+import { CustomerPhoto } from "@/components/customer/CustomerPhoto";
 
 export default async function CustomerDashboardPage() {
   const user = await requireRole("CUSTOMER");
@@ -59,6 +60,12 @@ export default async function CustomerDashboardPage() {
             <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-500">
               My Profile
             </h3>
+            <CustomerPhoto
+              customerProfileId={profile.id}
+              hasPhoto={Boolean(profile.passportPhotoUrl)}
+              alt={`${profile.user.name}'s passport photo`}
+              className="mb-5"
+            />
             <dl className="space-y-3 text-sm">
               <Row label="Full name" value={profile.user.name} />
               <Row label="Phone" value={profile.user.phone ?? "—"} />

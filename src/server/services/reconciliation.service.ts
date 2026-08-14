@@ -10,10 +10,7 @@
  * the second half of the workflow.
  */
 import "server-only";
-import { prisma } from "@/lib/prisma";
 import { today } from "@/lib/date";
-import { sumCollectedByAgent } from "@/server/repositories/contribution.repository";
-import { findReconciliationForAgentAndDate } from "@/server/repositories/reconciliation.repository";
 import {
   submitReconciliationSchema,
   reviewReconciliationSchema,
@@ -21,10 +18,20 @@ import {
   type ReviewReconciliationInput,
 } from "@/validations/reconciliation";
 import { ok, fail, type ActionResult } from "@/lib/action-result";
+import {
+  lockReconciliationState,
+  runFinancialTransaction,
+} from "@/lib/financial-transaction";
+import { isUniqueConstraintConflict } from "@/lib/prisma-errors";
+import {
+  createAuditLog,
+  type AuditActorContext,
+} from "@/server/services/audit.service";
 
 export async function submitReconciliation(
   input: SubmitReconciliationInput,
-  agentId: string
+  agentId: string,
+  audit: AuditActorContext,
 ): Promise<ActionResult<{ reconciliationId: string }>> {
   const parsed = submitReconciliationSchema.safeParse(input);
   if (!parsed.success) {
@@ -34,33 +41,64 @@ export async function submitReconciliation(
   const { actualCash, agentNote } = parsed.data;
   const reconciliationDate = today();
 
-  const existing = await findReconciliationForAgentAndDate(agentId, reconciliationDate);
-  if (existing) {
-    return fail("You have already submitted today's collection report.");
+  try {
+    const result = await runFinancialTransaction(async (tx) => {
+      await lockReconciliationState(tx, agentId, reconciliationDate);
+      const existing = await tx.dailyReconciliation.findUnique({
+        where: { agentId_reconciliationDate: { agentId, reconciliationDate } },
+        select: { id: true },
+      });
+      if (existing) return { success: false as const, error: "You have already submitted today's collection report." };
+
+      const aggregate = await tx.contribution.aggregate({
+        where: {
+          collectedById: agentId,
+          collectionDate: reconciliationDate,
+          status: "COLLECTED",
+          paymentMethod: "CASH",
+        },
+        _sum: { amount: true },
+      });
+      const report = await tx.dailyReconciliation.create({
+        data: {
+          agentId,
+          reconciliationDate,
+          expectedCash: aggregate._sum.amount ?? 0,
+          actualCash,
+          agentNote: agentNote || null,
+          status: "SUBMITTED",
+        },
+      });
+      await createAuditLog(tx, {
+        actorId: audit.actorId,
+        actorRole: audit.actorRole,
+        action: "RECONCILIATION_SUBMITTED",
+        outcome: "SUCCESS",
+        entityType: "DailyReconciliation",
+        entityId: report.id,
+        summary: "End-of-day reconciliation submitted.",
+        metadata: {
+          reconciliationDate: reconciliationDate.toISOString().slice(0, 10),
+          expectedCash: Number(aggregate._sum.amount ?? 0),
+          actualCash,
+        },
+      }, audit);
+      return { success: true as const, reconciliationId: report.id };
+    });
+    if (!result.success) return fail(result.error);
+    return ok({ reconciliationId: result.reconciliationId });
+  } catch (error) {
+    if (isUniqueConstraintConflict(error)) {
+      return fail("You have already submitted today's collection report.");
+    }
+    throw error;
   }
-
-  const expectedCash = await sumCollectedByAgent(agentId, {
-    start: reconciliationDate,
-    end: reconciliationDate,
-  });
-
-  const report = await prisma.dailyReconciliation.create({
-    data: {
-      agentId,
-      reconciliationDate,
-      expectedCash,
-      actualCash,
-      agentNote: agentNote || null,
-      status: "SUBMITTED",
-    },
-  });
-
-  return ok({ reconciliationId: report.id });
 }
 
 export async function reviewReconciliation(
   input: ReviewReconciliationInput,
-  reviewedById: string
+  reviewedById: string,
+  audit: AuditActorContext,
 ): Promise<ActionResult<{ reconciliationId: string }>> {
   const parsed = reviewReconciliationSchema.safeParse(input);
   if (!parsed.success) {
@@ -69,23 +107,40 @@ export async function reviewReconciliation(
 
   const { reconciliationId, decision, reviewNote } = parsed.data;
 
-  const report = await prisma.dailyReconciliation.findUnique({ where: { id: reconciliationId } });
-  if (!report) {
-    return fail("Reconciliation report not found.");
-  }
-  if (report.status !== "SUBMITTED") {
-    return fail("This report has already been reviewed.");
-  }
+  const result = await runFinancialTransaction(async (tx) => {
+    const updated = await tx.dailyReconciliation.updateMany({
+      where: { id: reconciliationId, status: "SUBMITTED" },
+      data: {
+        status: decision,
+        reviewedById,
+        reviewNote: reviewNote || null,
+        reviewedAt: new Date(),
+      },
+    });
 
-  await prisma.dailyReconciliation.update({
-    where: { id: reconciliationId },
-    data: {
-      status: decision,
-      reviewedById,
-      reviewNote: reviewNote || null,
-      reviewedAt: new Date(),
-    },
+    if (updated.count !== 1) {
+      const exists = await tx.dailyReconciliation.findUnique({
+        where: { id: reconciliationId }, select: { id: true },
+      });
+      return {
+        success: false as const,
+        error: exists ? "This report has already been reviewed." : "Reconciliation report not found.",
+      };
+    }
+
+    await createAuditLog(tx, {
+      actorId: audit.actorId,
+      actorRole: audit.actorRole,
+      action: "RECONCILIATION_REVIEWED",
+      outcome: "SUCCESS",
+      entityType: "DailyReconciliation",
+      entityId: reconciliationId,
+      summary: `Reconciliation ${decision.toLowerCase()}.`,
+      metadata: { decision },
+    }, audit);
+    return { success: true as const };
   });
 
+  if (!result.success) return fail(result.error);
   return ok({ reconciliationId });
 }

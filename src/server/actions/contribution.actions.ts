@@ -31,7 +31,11 @@ import type {
 import { ok, fail } from "@/lib/action-result";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { writeAuditLog } from "@/server/services/audit.service";
+import {
+  getAuditRequestContext,
+  writeRequiredAuditLog,
+  writeAuditLog,
+} from "@/server/services/audit.service";
 
 export async function searchQuickPayCustomersAction(query: string) {
   const user = await requireRole(["ADMIN", "AGENT"]);
@@ -87,17 +91,21 @@ export async function recordContributionAction(input: RecordContributionInput) {
   const { user, error } = await assertCanManageCustomer(input.customerProfileId);
   if (error) return error;
 
-  const result = await recordContribution(input, user!.id);
+  const requestContext = await getAuditRequestContext();
+  const audit = { actorId: user!.id, actorRole: user!.role, ...requestContext };
+  const result = await recordContribution(input, user!.id, audit);
 
-  await writeAuditLog({
-    actorId: user!.id,
-    actorRole: user!.role,
-    action: input.status === "COLLECTED" ? "CONTRIBUTION_RECORDED" : "MISSED_VISIT_RECORDED",
-    outcome: result.success ? "SUCCESS" : "FAILURE",
-    entityType: "CustomerProfile",
-    entityId: input.customerProfileId,
-    summary: result.success ? "Daily collection outcome recorded." : result.message,
-  });
+  if (!result.success) {
+    await writeRequiredAuditLog({
+      actorId: user!.id,
+      actorRole: user!.role,
+      action: input.status === "COLLECTED" ? "CONTRIBUTION_RECORDED" : "MISSED_VISIT_RECORDED",
+      outcome: "FAILURE",
+      entityType: "CustomerProfile",
+      entityId: input.customerProfileId,
+      summary: result.message,
+    }, requestContext);
+  }
 
   if (result.success) {
     revalidatePath("/agent");
@@ -153,18 +161,21 @@ export async function recordQuickPayAction(input: QuickPayInput) {
   const { user, error } = await assertCanManageCustomer(input.customerProfileId);
   if (error) return error;
 
-  const result = await recordQuickPay(input, user!.id, user!.role === "ADMIN");
+  const requestContext = await getAuditRequestContext();
+  const audit = { actorId: user!.id, actorRole: user!.role, ...requestContext };
+  const result = await recordQuickPay(input, user!.id, user!.role === "ADMIN", audit);
 
-  await writeAuditLog({
-    actorId: user!.id,
-    actorRole: user!.role,
-    action: "QUICK_PAY",
-    outcome: result.success ? "SUCCESS" : "FAILURE",
-    entityType: "CustomerProfile",
-    entityId: input.customerProfileId,
-    summary: result.success ? `Payment recorded with receipt ${result.data.receiptNumber}.` : result.message,
-    metadata: result.success ? { amount: input.amount, receiptNumber: result.data.receiptNumber } : undefined,
-  });
+  if (!result.success) {
+    await writeRequiredAuditLog({
+      actorId: user!.id,
+      actorRole: user!.role,
+      action: "QUICK_PAY",
+      outcome: "FAILURE",
+      entityType: "CustomerProfile",
+      entityId: input.customerProfileId,
+      summary: result.message,
+    }, requestContext);
+  }
 
   if (result.success) {
     revalidatePath("/agent");

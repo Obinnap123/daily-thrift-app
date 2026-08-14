@@ -9,7 +9,7 @@
  * outside the /admin/* path that middleware already protects by URL.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/session";
 import { buildReportTable, type ReportType } from "@/lib/reports/build-report";
 import { renderReportToPdfBuffer } from "@/lib/reports/pdf";
 import { renderReportToExcelBuffer } from "@/lib/reports/xlsx";
@@ -17,8 +17,8 @@ import { renderReportToExcelBuffer } from "@/lib/reports/xlsx";
 const VALID_TYPES: ReportType[] = ["daily", "weekly", "monthly", "agent", "customer", "payout"];
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user || session.user.role !== "ADMIN") {
+  const user = await getCurrentUser();
+  if (!user || user.role !== "ADMIN") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

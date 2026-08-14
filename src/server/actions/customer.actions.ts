@@ -134,6 +134,7 @@ export async function uploadCustomerPhotoAction(formData: FormData) {
     revalidatePath(`/admin/customers/${customerProfileId}`);
     revalidatePath("/agent");
     revalidatePath(`/agent/customers/${customerProfileId}`);
+    revalidatePath("/customer");
   }
 
   return result;

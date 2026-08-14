@@ -6,7 +6,7 @@
  * (Middleware also protects /admin, /agent, /customer directly, but doing
  * the redirect here too gives a nicer landing experience at "/".)
  */
-import { auth } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/session";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 
@@ -17,10 +17,10 @@ const ROLE_HOME: Record<string, string> = {
 };
 
 export default async function Home() {
-  const session = await auth();
+  const user = await getCurrentUser();
 
-  if (session?.user?.role) {
-    redirect(ROLE_HOME[session.user.role] ?? "/login");
+  if (user?.role) {
+    redirect(ROLE_HOME[user.role] ?? "/login");
   }
 
   return (

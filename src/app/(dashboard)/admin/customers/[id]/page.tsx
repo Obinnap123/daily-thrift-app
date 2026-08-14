@@ -116,7 +116,7 @@ export default async function AdminCustomerDetailPage({
             </h3>
             <PassportPhotoUpload
               customerProfileId={customer.id}
-              currentPhotoUrl={customer.passportPhotoUrl}
+              hasCurrentPhoto={Boolean(customer.passportPhotoUrl)}
             />
           </Card>
 

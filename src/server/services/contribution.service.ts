@@ -29,7 +29,6 @@
  * place that owns "what does completion mean" logic.
  */
 import "server-only";
-import { prisma } from "@/lib/prisma";
 import { addDaysToDate, today, toDateOnly } from "@/lib/date";
 import {
   recordContributionSchema,
@@ -37,11 +36,18 @@ import {
   type RecordContributionInput,
   type QuickPayInput,
 } from "@/validations/contribution";
-import { findActivePlanForCustomer } from "@/server/repositories/contribution-plan.repository";
-import { findContributionForPlanAndDate } from "@/server/repositories/contribution.repository";
 import { generateContributionReceiptNumber } from "@/lib/receipt-number";
 import { ok, fail, type ActionResult } from "@/lib/action-result";
 import type { Prisma } from "@/generated/prisma/client";
+import { isUniqueConstraintConflict } from "@/lib/prisma-errors";
+import {
+  lockCustomerFinancialState,
+  runFinancialTransaction,
+} from "@/lib/financial-transaction";
+import {
+  createAuditLog,
+  type AuditActorContext,
+} from "@/server/services/audit.service";
 
 type PlanForAllocation = {
   id: string;
@@ -51,6 +57,29 @@ type PlanForAllocation = {
   nextCoverageDate: Date | null;
   creditBalance: unknown;
 };
+
+async function createNextActivePlan(
+  tx: Prisma.TransactionClient,
+  customerProfileId: string,
+  previous: {
+    dailyAmount: unknown;
+    nextCoverageDate: Date | null;
+  },
+  collectionDate: Date,
+) {
+  const startDate = previous.nextCoverageDate ?? collectionDate;
+
+  return tx.contributionPlan.create({
+    data: {
+      customerProfileId,
+      dailyAmount: previous.dailyAmount as Prisma.Decimal,
+      durationDays: 31,
+      startDate,
+      expectedMaturityDate: addDaysToDate(startDate, 30),
+      nextCoverageDate: startDate,
+    },
+  });
+}
 
 async function allocateCollectedAmount(
   tx: Prisma.TransactionClient,
@@ -89,7 +118,8 @@ async function allocateCollectedAmount(
 
 export async function recordContribution(
   input: RecordContributionInput,
-  collectedById: string
+  collectedById: string,
+  audit: AuditActorContext,
 ): Promise<ActionResult<{ contributionId: string }>> {
   const parsed = recordContributionSchema.safeParse(input);
   if (!parsed.success) {
@@ -99,49 +129,87 @@ export async function recordContribution(
   const { customerProfileId, status, amount, note } = parsed.data;
 
   const collectionDate = today();
-  let plan = await findActivePlanForCustomer(customerProfileId);
-  if (!plan) {
-    const previous = status === "COLLECTED" ? await prisma.contributionPlan.findFirst({
-      where: { customerProfileId }, orderBy: { createdAt: "desc" },
-    }) : null;
-    if (!previous) return fail("This customer has no active savings plan. Start a plan before recording contributions.");
-    const startDate = previous.nextCoverageDate ?? collectionDate;
-    plan = await prisma.contributionPlan.create({
-      data: { customerProfileId, dailyAmount: previous.dailyAmount, durationDays: 31, startDate, expectedMaturityDate: addDaysToDate(startDate, 30), nextCoverageDate: startDate },
-    });
-  }
-
-  const alreadyRecorded = await findContributionForPlanAndDate(plan.id, collectionDate);
-  if (alreadyRecorded) {
-    return fail("Today's collection has already been recorded for this customer.");
-  }
-
   // Draw the receipt number BEFORE the transaction — nextval() on a
   // sequence is its own atomic operation (same reasoning as
   // generateReceiptNumber() in the Payout module). Only COLLECTED rows get
   // a receipt; a MISSED day has nothing to issue a receipt for.
   const receiptNumber = status === "COLLECTED" ? await generateContributionReceiptNumber() : null;
 
-  const contribution = await prisma.$transaction(async (tx) => {
-    const created = await tx.contribution.create({
-      data: {
-        contributionPlanId: plan.id,
-        customerProfileId,
-        collectedById,
-        collectionDate,
-        status,
-        amount: status === "COLLECTED" ? amount : null,
-        note: note || null,
-        receiptNumber,
-      },
-    });
-    if (status === "COLLECTED") {
-      await allocateCollectedAmount(tx, plan, created.id, Number(amount));
-    }
-    return created;
-  }, { isolationLevel: "Serializable" });
+  try {
+    const result = await runFinancialTransaction(async (tx) => {
+      await lockCustomerFinancialState(tx, customerProfileId);
+      let plan = await tx.contributionPlan.findFirst({
+        where: { customerProfileId, status: "ACTIVE" },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!plan) {
+        const previous = status === "COLLECTED"
+          ? await tx.contributionPlan.findFirst({
+              where: { customerProfileId },
+              orderBy: { createdAt: "desc" },
+            })
+          : null;
+        if (!previous) {
+          return {
+            success: false as const,
+            error: "This customer has no active savings plan. Start a plan before recording contributions.",
+          };
+        }
+        plan = await createNextActivePlan(tx, customerProfileId, previous, collectionDate);
+      }
 
-  return ok({ contributionId: contribution.id });
+      const alreadyRecorded = await tx.contribution.findFirst({
+        where: { contributionPlanId: plan.id, collectionDate, isOverride: false },
+        select: { id: true },
+      });
+      if (alreadyRecorded) {
+        return {
+          success: false as const,
+          error: "Today's collection has already been recorded for this customer.",
+        };
+      }
+
+      const created = await tx.contribution.create({
+        data: {
+          contributionPlanId: plan.id,
+          customerProfileId,
+          collectedById,
+          collectionDate,
+          status,
+          amount: status === "COLLECTED" ? amount : null,
+          note: note || null,
+          receiptNumber,
+        },
+      });
+      if (status === "COLLECTED") {
+        await allocateCollectedAmount(tx, plan, created.id, Number(amount));
+      }
+      await createAuditLog(tx, {
+        actorId: audit.actorId,
+        actorRole: audit.actorRole,
+        action: status === "COLLECTED" ? "CONTRIBUTION_RECORDED" : "MISSED_VISIT_RECORDED",
+        outcome: "SUCCESS",
+        entityType: "Contribution",
+        entityId: created.id,
+        summary: "Daily collection outcome recorded.",
+        metadata: {
+          customerProfileId,
+          status,
+          amount: status === "COLLECTED" ? Number(amount) : null,
+          receiptNumber,
+          collectionDate: collectionDate.toISOString().slice(0, 10),
+        },
+      }, audit);
+      return { success: true as const, contributionId: created.id };
+    });
+    if (!result.success) return fail(result.error);
+    return ok({ contributionId: result.contributionId });
+  } catch (error) {
+    if (isUniqueConstraintConflict(error)) {
+      return fail("Today's collection has already been recorded for this customer.");
+    }
+    throw error;
+  }
 }
 
 /**
@@ -156,7 +224,8 @@ export async function recordContribution(
 export async function recordQuickPay(
   input: QuickPayInput,
   collectedById: string,
-  actorIsAdmin: boolean
+  actorIsAdmin: boolean,
+  audit: AuditActorContext,
 ): Promise<ActionResult<{ contributionId: string; receiptNumber: string }>> {
   const parsed = quickPaySchema.safeParse(input);
   if (!parsed.success) {
@@ -175,58 +244,81 @@ export async function recordQuickPay(
     : today();
   const isOverride = actorIsAdmin ? parsed.data.isOverride : false;
   const overrideReason = isOverride ? parsed.data.overrideReason || null : null;
-
-  let plan = await findActivePlanForCustomer(customerProfileId);
-  if (!plan) {
-    const previous = await prisma.contributionPlan.findFirst({
-      where: { customerProfileId },
-      orderBy: { createdAt: "desc" },
-    });
-    if (!previous) {
-      return fail("This customer has no savings plan. Start a plan before recording a payment.");
-    }
-    const startDate = previous.nextCoverageDate ?? collectionDate;
-    plan = await prisma.contributionPlan.create({
-      data: {
-        customerProfileId,
-        dailyAmount: previous.dailyAmount,
-        durationDays: 31,
-        startDate,
-        expectedMaturityDate: addDaysToDate(startDate, 30),
-        nextCoverageDate: startDate,
-      },
-    });
-  }
+  if (collectionDate > today()) return fail("A payment cannot be dated in the future.");
 
   // Draw the receipt number BEFORE the transaction — nextval() on a
   // sequence is its own atomic operation.
   const receiptNumber = await generateContributionReceiptNumber();
 
-  const result = await prisma.$transaction(async (tx) => {
-    const created = await tx.contribution.create({
-      data: {
-        contributionPlanId: plan.id,
-        customerProfileId,
-        collectedById,
-        collectionDate,
-        status: "COLLECTED",
-        amount,
-        note: note || null,
-        paymentMethod,
-        receiptNumber,
-        isOverride,
-        overriddenById: isOverride ? collectedById : null,
-        overrideReason,
-      },
-    });
-    const allocation = await allocateCollectedAmount(tx, plan!, created.id, amount);
-    return { contribution: created, allocation };
-  }, { isolationLevel: "Serializable" });
+  try {
+    const result = await runFinancialTransaction(async (tx) => {
+      await lockCustomerFinancialState(tx, customerProfileId);
+      let plan = await tx.contributionPlan.findFirst({
+        where: { customerProfileId, status: "ACTIVE" },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!plan) {
+        const previous = await tx.contributionPlan.findFirst({
+          where: { customerProfileId },
+          orderBy: { createdAt: "desc" },
+        });
+        if (!previous) {
+          return {
+            success: false as const,
+            error: "This customer has no savings plan. Start a plan before recording a payment.",
+          };
+        }
+        plan = await createNextActivePlan(tx, customerProfileId, previous, collectionDate);
+      }
 
-  return ok({
-    contributionId: result.contribution.id,
-    receiptNumber,
-    slotsFunded: result.allocation.fullSlots,
-    creditBalance: result.allocation.creditBalance,
-  });
+      const created = await tx.contribution.create({
+        data: {
+          contributionPlanId: plan.id,
+          customerProfileId,
+          collectedById,
+          collectionDate,
+          status: "COLLECTED",
+          amount,
+          note: note || null,
+          paymentMethod,
+          receiptNumber,
+          isOverride,
+          overriddenById: isOverride ? collectedById : null,
+          overrideReason,
+        },
+      });
+      const allocation = await allocateCollectedAmount(tx, plan, created.id, amount);
+      await createAuditLog(tx, {
+        actorId: audit.actorId,
+        actorRole: audit.actorRole,
+        action: "QUICK_PAY",
+        outcome: "SUCCESS",
+        entityType: "Contribution",
+        entityId: created.id,
+        summary: `Payment recorded with receipt ${receiptNumber}.`,
+        metadata: {
+          customerProfileId,
+          amount,
+          receiptNumber,
+          paymentMethod,
+          collectionDate: collectionDate.toISOString().slice(0, 10),
+          isOverride,
+        },
+      }, audit);
+      return { success: true as const, contribution: created, allocation };
+    });
+    if (!result.success) return fail(result.error);
+
+    return ok({
+      contributionId: result.contribution.id,
+      receiptNumber,
+      slotsFunded: result.allocation.fullSlots,
+      creditBalance: result.allocation.creditBalance,
+    });
+  } catch (error) {
+    if (isUniqueConstraintConflict(error)) {
+      return fail("A payment has already been recorded for this customer today. An Admin may use an override when appropriate.");
+    }
+    throw error;
+  }
 }

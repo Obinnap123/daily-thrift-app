@@ -9,15 +9,25 @@ import { requireRole } from "@/lib/session";
 import { submitReconciliation, reviewReconciliation } from "@/server/services/reconciliation.service";
 import type { SubmitReconciliationInput, ReviewReconciliationInput } from "@/validations/reconciliation";
 import { revalidatePath } from "next/cache";
-import { writeAuditLog } from "@/server/services/audit.service";
+import {
+  getAuditRequestContext,
+  writeRequiredAuditLog,
+} from "@/server/services/audit.service";
 import { notifyAdmins } from "@/server/repositories/notification.repository";
 import { prisma } from "@/lib/prisma";
 
 export async function submitReconciliationAction(input: SubmitReconciliationInput) {
   const user = await requireRole("AGENT");
+  const requestContext = await getAuditRequestContext();
 
-  const result = await submitReconciliation(input, user.id);
-  await writeAuditLog({ actorId: user.id, actorRole: user.role, action: "RECONCILIATION_SUBMITTED", outcome: result.success ? "SUCCESS" : "FAILURE", entityType: "DailyReconciliation", entityId: result.success ? result.data.reconciliationId : undefined, summary: result.success ? `${user.name} submitted an end-of-day reconciliation.` : result.message });
+  const result = await submitReconciliation(input, user.id, {
+    actorId: user.id,
+    actorRole: user.role,
+    ...requestContext,
+  });
+  if (!result.success) {
+    await writeRequiredAuditLog({ actorId: user.id, actorRole: user.role, action: "RECONCILIATION_SUBMITTED", outcome: "FAILURE", entityType: "DailyReconciliation", summary: result.message }, requestContext);
+  }
 
   if (result.success) {
     revalidatePath("/agent/reconciliation");
@@ -30,10 +40,17 @@ export async function submitReconciliationAction(input: SubmitReconciliationInpu
 
 export async function reviewReconciliationAction(input: ReviewReconciliationInput) {
   const user = await requireRole("ADMIN");
+  const requestContext = await getAuditRequestContext();
 
-  const result = await reviewReconciliation(input, user.id);
+  const result = await reviewReconciliation(input, user.id, {
+    actorId: user.id,
+    actorRole: user.role,
+    ...requestContext,
+  });
   const report = await prisma.dailyReconciliation.findUnique({ where: { id: input.reconciliationId }, select: { agentId: true } });
-  await writeAuditLog({ actorId: user.id, actorRole: user.role, action: "RECONCILIATION_REVIEWED", outcome: result.success ? "SUCCESS" : "FAILURE", entityType: "DailyReconciliation", entityId: input.reconciliationId, summary: result.success ? `Reconciliation ${input.decision.toLowerCase()}.` : result.message });
+  if (!result.success) {
+    await writeRequiredAuditLog({ actorId: user.id, actorRole: user.role, action: "RECONCILIATION_REVIEWED", outcome: "FAILURE", entityType: "DailyReconciliation", entityId: input.reconciliationId, summary: result.message }, requestContext);
+  }
 
   if (result.success) {
     revalidatePath("/admin/reconciliations");

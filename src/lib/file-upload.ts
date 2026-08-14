@@ -1,89 +1,94 @@
-/**
- * Passport photo upload storage.
- * ----------------------------------------------------------------------------
- * This app runs on a Node.js server (NOT Cloudflare Workers/Pages — see
- * README "Deployment Notes"), so local filesystem access via `fs` is
- * available here, unlike in the Workers runtime. Uploaded photos are saved
- * under `public/uploads/customers/` so Next.js serves them directly as
- * static files at `/uploads/customers/<filename>`.
- *
- * ⚠️ Production note: on most Node hosts (Railway, Render, Fly.io, a bare
- * VPS) local disk is fine as long as it's a persistent volume, but on
- * ephemeral/serverless Node runtimes local files can be wiped on redeploy.
- * If that turns out to be the target host, swap this module's
- * implementation for an S3-compatible client (e.g. Cloudflare R2, AWS S3)
- * without touching any calling code — every caller only depends on the
- * `savePassportPhoto()` / `deletePassportPhoto()` function signatures below.
- */
 import "server-only";
-import { mkdir, writeFile, unlink } from "fs/promises";
-import path from "path";
 import { randomUUID } from "crypto";
+import sharp from "sharp";
+import {
+  getPhotoBucketName,
+  getPrivateStorageClient,
+  PhotoStorageConfigurationError,
+  assertPrivatePhotoBucket,
+} from "@/lib/supabase-storage";
 
-const UPLOAD_SUBDIR = "uploads/customers";
-const PUBLIC_DIR = path.join(process.cwd(), "public");
-const UPLOAD_DIR = path.join(PUBLIC_DIR, UPLOAD_SUBDIR);
-
-const ALLOWED_MIME_TYPES: Record<string, string> = {
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/webp": "webp",
-};
-
-const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5MB
+const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
+const MAX_INPUT_PIXELS = 40_000_000;
+const ALLOWED_DECODED_FORMATS = new Set(["jpeg", "png", "webp"]);
 
 export class PhotoUploadError extends Error {}
 
-/**
- * Save an uploaded passport photo (from a multipart form `File`) to disk
- * and return its public URL path (e.g. "/uploads/customers/abc123.jpg").
- * Throws `PhotoUploadError` with a user-friendly message on invalid input
- * — callers should catch this and surface it via the normal
- * `ActionResult.fail()` pattern rather than letting it bubble as a 500.
- */
-export async function savePassportPhoto(file: File): Promise<string> {
+function isSafeObjectPath(customerProfileId: string, objectPath: string): boolean {
+  return (
+    objectPath.startsWith(`${customerProfileId}/`) &&
+    !objectPath.includes("..") &&
+    /^[A-Za-z0-9_-]+\/[0-9a-f-]+\.webp$/i.test(objectPath)
+  );
+}
+
+async function normalizePassportPhoto(file: File): Promise<Buffer> {
   if (!(file instanceof File) || file.size === 0) {
     throw new PhotoUploadError("Please choose a photo to upload.");
   }
-
-  const extension = ALLOWED_MIME_TYPES[file.type];
-  if (!extension) {
-    throw new PhotoUploadError("Photo must be a JPEG, PNG, or WEBP image.");
-  }
-
   if (file.size > MAX_FILE_SIZE_BYTES) {
     throw new PhotoUploadError("Photo must be smaller than 5MB.");
   }
 
-  await mkdir(UPLOAD_DIR, { recursive: true });
+  const input = Buffer.from(await file.arrayBuffer());
 
-  const filename = `${randomUUID()}.${extension}`;
-  const filePath = path.join(UPLOAD_DIR, filename);
-  const buffer = Buffer.from(await file.arrayBuffer());
-  await writeFile(filePath, buffer);
+  try {
+    const image = sharp(input, { failOn: "error", limitInputPixels: MAX_INPUT_PIXELS });
+    const metadata = await image.metadata();
+    if (!metadata.format || !ALLOWED_DECODED_FORMATS.has(metadata.format)) {
+      throw new PhotoUploadError("Photo must be a genuine JPEG, PNG, or WEBP image.");
+    }
 
-  return `/${UPLOAD_SUBDIR}/${filename}`;
+    // rotate() honors EXIF orientation. Re-encoding without withMetadata()
+    // removes EXIF/GPS and other embedded metadata from the stored image.
+    return await image
+      .rotate()
+      .resize({ width: 1200, height: 1200, fit: "inside", withoutEnlargement: true })
+      .webp({ quality: 82 })
+      .toBuffer();
+  } catch (error) {
+    if (error instanceof PhotoUploadError) throw error;
+    throw new PhotoUploadError("The selected file is not a valid, readable image.");
+  }
 }
 
-/**
- * Delete a previously-saved passport photo, given its public URL path
- * (as returned by savePassportPhoto). Used when a customer uploads a
- * replacement photo, to avoid leaving orphaned files on disk. Silently
- * ignores a missing file (e.g. already deleted, or was never a local
- * path) rather than failing the whole edit operation over a cleanup step.
- */
-export async function deletePassportPhoto(publicUrlPath: string | null | undefined): Promise<void> {
-  if (!publicUrlPath || !publicUrlPath.startsWith(`/${UPLOAD_SUBDIR}/`)) {
-    return;
-  }
-  const filename = publicUrlPath.slice(`/${UPLOAD_SUBDIR}/`.length);
-  // Defense against path traversal in a stored value we don't fully trust.
-  if (filename.includes("..") || filename.includes("/")) {
-    return;
-  }
+/** Save an inspected, normalized image in the private Supabase bucket. */
+export async function savePassportPhoto(
+  customerProfileId: string,
+  file: File,
+): Promise<string> {
+  const normalized = await normalizePassportPhoto(file);
+  const objectPath = `${customerProfileId}/${randomUUID()}.webp`;
+
   try {
-    await unlink(path.join(UPLOAD_DIR, filename));
-  } catch {
-    // File already gone or never existed locally — not a failure case.
+    await assertPrivatePhotoBucket();
+    const client = getPrivateStorageClient();
+    const { error } = await client.storage.from(getPhotoBucketName()).upload(objectPath, normalized, {
+      contentType: "image/webp",
+      cacheControl: "0",
+      upsert: false,
+    });
+    if (error) throw error;
+    return objectPath;
+  } catch (error) {
+    if (error instanceof PhotoStorageConfigurationError) {
+      console.error(error.message);
+    } else {
+      console.error("Private passport photo upload failed.", error);
+    }
+    throw new PhotoUploadError("Photo storage is temporarily unavailable. Please try again later.");
   }
+}
+
+/** Delete only an object belonging to the expected customer namespace. */
+export async function deletePassportPhoto(
+  customerProfileId: string,
+  objectPath: string | null | undefined,
+): Promise<void> {
+  if (!objectPath || !isSafeObjectPath(customerProfileId, objectPath)) return;
+
+  await assertPrivatePhotoBucket();
+  const client = getPrivateStorageClient();
+  const { error } = await client.storage.from(getPhotoBucketName()).remove([objectPath]);
+  if (error) throw error;
 }

@@ -30,6 +30,23 @@ import { loginSchema } from "@/validations/auth";
 import { normalizePhone } from "@/lib/phone";
 import { writeAuditLog } from "@/server/services/audit.service";
 import { authConfig } from "@/lib/auth.config";
+import type { Role } from "@/generated/prisma/client";
+import {
+  isSessionSecurityStateCurrent,
+  parseSessionSecurityClaims,
+} from "@/lib/session-revocation";
+import {
+  applyLoginDelay,
+  checkLoginThrottle,
+  clearSuccessfulIdentifierThrottle,
+  createLoginThrottleContext,
+  recordLoginFailure,
+} from "@/server/services/login-throttle.service";
+
+// A valid bcrypt hash used only to equalize the work performed when an
+// identifier does not exist. It is not an account credential.
+const DUMMY_PASSWORD_HASH =
+  "$2b$12$lshVbfxJxuBhIfSPJIEWn.o2wNor5KiV6nxCbVOSHj/BBYfCGi38C";
 
 /**
  * Decide how to look up the entered identifier: as an email (contains "@")
@@ -56,36 +73,68 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         password: { label: "Password", type: "password" },
         portalRole: { label: "Portal role", type: "text" },
       },
-      async authorize(rawCredentials) {
+      async authorize(rawCredentials, request) {
         // Validate shape/format before touching the database.
         const parsed = loginSchema.safeParse(rawCredentials);
         if (!parsed.success) return null;
 
         const { identifier, password, portalRole } = parsed.data;
+        const throttleContext = createLoginThrottleContext(identifier, request);
+        const throttleDecision = await checkLoginThrottle(throttleContext);
+        await applyLoginDelay(throttleDecision.delayMs);
+
+        if (throttleDecision.blocked) {
+          await writeAuditLog({
+            action: "SIGN_IN",
+            outcome: "FAILURE",
+            summary: "Sign-in rejected by temporary login throttling.",
+          });
+          return null;
+        }
+
+        async function rejectLogin(
+          summary: string,
+          account?: { id: string; role: Role },
+        ) {
+          await Promise.all([
+            recordLoginFailure(throttleContext),
+            writeAuditLog({
+              actorId: account?.id,
+              actorRole: account?.role,
+              action: "SIGN_IN",
+              outcome: "FAILURE",
+              entityType: account ? "User" : undefined,
+              entityId: account?.id,
+              summary,
+            }),
+          ]);
+          return null;
+        }
 
         const user = await prisma.user.findUnique({
           where: resolveIdentifierLookup(identifier),
         });
         if (!user) {
-          await writeAuditLog({ action: "SIGN_IN", outcome: "FAILURE", summary: "Sign-in rejected: account not found." });
-          return null;
+          await verifyPassword(password, DUMMY_PASSWORD_HASH);
+          return rejectLogin("Sign-in rejected: invalid credentials.");
         }
 
+        // Perform password verification before evaluating account state or
+        // portal role so external response timing does not reveal which check
+        // failed. The browser still receives one generic credentials error.
+        const isValidPassword = await verifyPassword(password, user.passwordHash);
+
         if (user.role !== portalRole) {
-          await writeAuditLog({ actorId: user.id, actorRole: user.role, action: "SIGN_IN", outcome: "FAILURE", entityType: "User", entityId: user.id, summary: "Sign-in rejected: incorrect portal." });
-          return null;
+          return rejectLogin("Sign-in rejected: incorrect portal.", user);
         }
 
         // Block disabled accounts (e.g. an agent who was let go).
         if (!user.isActive) {
-          await writeAuditLog({ actorId: user.id, actorRole: user.role, action: "SIGN_IN", outcome: "FAILURE", entityType: "User", entityId: user.id, summary: "Sign-in rejected: account is inactive." });
-          return null;
+          return rejectLogin("Sign-in rejected: account is inactive.", user);
         }
 
-        const isValidPassword = await verifyPassword(password, user.passwordHash);
         if (!isValidPassword) {
-          await writeAuditLog({ actorId: user.id, actorRole: user.role, action: "SIGN_IN", outcome: "FAILURE", entityType: "User", entityId: user.id, summary: "Sign-in rejected: invalid credentials." });
-          return null;
+          return rejectLogin("Sign-in rejected: invalid credentials.", user);
         }
 
         // Record the successful login time. We deliberately `await` this
@@ -95,6 +144,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         await Promise.all([
           prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } }),
           writeAuditLog({ actorId: user.id, actorRole: user.role, action: "SIGN_IN", outcome: "SUCCESS", entityType: "User", entityId: user.id, summary: `${user.name} signed in.` }),
+          clearSuccessfulIdentifierThrottle(throttleContext),
         ]);
 
         // The object returned here becomes `user` in the jwt() callback below.
@@ -103,9 +153,49 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           name: user.name,
           email: user.email,
           role: user.role,
+          sessionVersion: user.sessionVersion,
         };
       },
     }),
   ],
-  // jwt/session callbacks are inherited from authConfig (see auth.config.ts).
+  callbacks: {
+    async jwt({ token, user }) {
+      if (user) {
+        token.id = user.id;
+        token.role = user.role;
+        token.sessionVersion = user.sessionVersion;
+        token.revoked = false;
+        return token;
+      }
+
+      const claims = parseSessionSecurityClaims({
+        id: token.id,
+        role: token.role,
+        sessionVersion: token.sessionVersion,
+      });
+      if (!claims) {
+        token.revoked = true;
+        return token;
+      }
+
+      const currentAccount = await prisma.user.findUnique({
+        where: { id: claims.userId },
+        select: { isActive: true, role: true, sessionVersion: true },
+      });
+
+      token.revoked = !isSessionSecurityStateCurrent(claims, currentAccount);
+
+      return token;
+    },
+    async session({ session, token }) {
+      if (session.user) {
+        session.user.id = typeof token.id === "string" ? token.id : "";
+        session.user.role = token.role as Role;
+        session.user.sessionVersion =
+          typeof token.sessionVersion === "number" ? token.sessionVersion : -1;
+        session.user.revoked = token.revoked !== false;
+      }
+      return session;
+    },
+  },
 });

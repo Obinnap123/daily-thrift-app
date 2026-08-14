@@ -22,6 +22,7 @@ import { DashboardNav } from "@/components/layout/DashboardNav";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { CustomerTrackingPanel } from "@/components/dashboard/CustomerTrackingPanel";
+import { CustomerPhoto } from "@/components/customer/CustomerPhoto";
 import { format } from "date-fns";
 import Link from "next/link";
 
@@ -74,12 +75,20 @@ export default async function AgentCustomerDetailPage({
           <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-500">
             Profile
           </h3>
-          <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
+            <CustomerPhoto
+              customerProfileId={customer.id}
+              hasPhoto={Boolean(customer.passportPhotoUrl)}
+              alt={`${customer.user.name}'s passport photo`}
+              className="shrink-0"
+            />
+          <dl className="grid min-w-0 flex-1 grid-cols-1 gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
             <Row label="Customer code" value={customer.customerCode} />
             <Row label="Phone" value={customer.user.phone ?? "—"} />
             <Row label="ID number" value={customer.idNumber} />
             <Row label="Registered" value={format(customer.createdAt, "dd MMM yyyy")} />
           </dl>
+          </div>
         </Card>
 
         <CustomerTrackingPanel

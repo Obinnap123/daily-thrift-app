@@ -112,6 +112,9 @@ model User {
   role         Role      @default(CUSTOMER)
   /// Soft-disable a login without deleting the record (audit trail friendly).
   isActive     Boolean   @default(true)
+  /// Security stamp copied into each login JWT. Incrementing it immediately
+  /// invalidates every session issued with an older value.
+  sessionVersion Int     @default(0)
   /// Timestamp of the last successful login, useful for admin oversight.
   lastLoginAt  DateTime?
 
@@ -164,6 +167,24 @@ model User {
   @@map("users")
 }
 
+/// Shared, privacy-preserving login abuse counters. `id` is an HMAC of the
+/// normalized identifier or request IP; raw emails, phones, and IPs are never
+/// stored here. Rows are operational security state, not authentication data.
+model LoginThrottle {
+  id              String   @id
+  scope           String
+  failedAttempts  Int      @default(0)
+  windowStartedAt DateTime
+  lastAttemptAt   DateTime
+  lockedUntil     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([scope, updatedAt])
+  @@index([updatedAt])
+  @@map("login_throttles")
+}
+
 /// Thrift-specific profile data for a CUSTOMER user. Kept as a separate
 /// table (rather than extra nullable columns on User) because these fields
 /// are meaningless for ADMIN/AGENT accounts — this keeps the User table
@@ -187,9 +208,9 @@ model CustomerProfile {
   /// Used on receipts, search, and as the customer-facing reference number.
   customerCode String @unique
 
-  /// URL/path of the customer's uploaded passport photograph (stored via
-  /// Cloudflare R2 in production; nullable because a customer may be
-  /// registered before their photo is captured/uploaded).
+  /// Private Supabase Storage object key for the customer's passport
+  /// photograph. It is never a public URL; authorized access is proxied by
+  /// the application. Nullable because registration may precede capture.
   passportPhotoUrl String?
 
   /// The agent currently responsible for collecting this customer's daily
@@ -309,6 +330,8 @@ model ContributionPlan {
 
   @@index([customerProfileId])
   @@index([status])
+  // A raw partial unique index in migration 20260813120000 enforces at most
+  // one ACTIVE row per customer while permitting unlimited historical rows.
   @@map("contribution_plans")
 }
 
