@@ -33,7 +33,7 @@ This means the database is clean before the future one-active-period constraint 
 - [x] Add shared login rate limiting, progressive delays, and temporary lockout.
 - [x] Make financial dates and concurrent financial operations safe.
 - [x] Save critical financial audit records atomically with their operations.
-- [ ] Upgrade vulnerable production dependencies with regression testing.
+- [x] Upgrade vulnerable production dependencies with regression testing.
 - [ ] Run the complete role-based security regression suite on the deployed HTTPS application.
 
 ## Release safeguards
@@ -224,3 +224,30 @@ The old post-commit success audit calls were removed to prevent duplicates.
 
 No schema migration or financial-data mutation was required. TypeScript,
 focused ESLint, Prisma validation, and the production build all pass.
+
+## Step 9 dependency remediation
+
+The vulnerable runtime packages were upgraded deliberately without
+`npm audit fix --force` or a breaking ExcelJS downgrade:
+
+- Next.js `16.2.12` to `16.3.1`, including patched PostCSS and bundled Sharp.
+- Sharp `0.34.4` to `0.35.3`.
+- Prisma CLI, Client, and PostgreSQL adapter `7.9.0` to `7.9.1`, replacing the
+  vulnerable `@prisma/dev`, `find-my-way`, and Valibot chain.
+- `@hookform/resolvers` `5.5.7` to `5.8.0`.
+- Safe transitive patches for Fast URI, Nano ID, and both affected
+  brace-expansion release lines.
+
+ExcelJS `4.4.0` has no newer release and its upstream dependency still pins
+UUID 8.3.2. ExcelJS uses UUID v4 and is CommonJS-based, so UUID is narrowly
+overridden to patched CommonJS-compatible `11.1.1`; a real workbook was
+written and read back successfully. Development-only JS-YAML and
+TypeScript-ESLint brace-expansion advisories are likewise fixed with scoped
+patch overrides. The non-vulnerable ESLint preset remains at `16.2.12`
+because `16.3.1` introduced a severe lint startup regression; the patched
+Next.js runtime remains at `16.3.1` and both lint and build compatibility pass.
+
+Final `npm audit --omit=dev` and complete `npm audit` results are both zero
+vulnerabilities. Prisma generation/validation, TypeScript, ESLint, a Sharp
+WebP transform, an Excel workbook round-trip, and the Next.js production build
+all pass. No database migration or application business logic changed.
