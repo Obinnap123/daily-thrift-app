@@ -34,7 +34,7 @@ This means the database is clean before the future one-active-period constraint 
 - [x] Make financial dates and concurrent financial operations safe.
 - [x] Save critical financial audit records atomically with their operations.
 - [x] Upgrade vulnerable production dependencies with regression testing.
-- [ ] Run the complete role-based security regression suite on the deployed HTTPS application.
+- [x] Run the complete role-based security regression suite on the deployed HTTPS application.
 
 ## Release safeguards
 
@@ -251,3 +251,39 @@ Final `npm audit --omit=dev` and complete `npm audit` results are both zero
 vulnerabilities. Prisma generation/validation, TypeScript, ESLint, a Sharp
 WebP transform, an Excel workbook round-trip, and the Next.js production build
 all pass. No database migration or application business logic changed.
+
+## Step 10 deployed security regression
+
+The Vercel HTTPS Preview for commit `bd6a1c0` built successfully and was tested
+without performing payments, payouts, reconciliations, account edits, or other
+financial mutations.
+
+- Signed-out Admin, Agent, Customer, and Notifications routes redirect to the
+  appropriate login page. Signed-out report export returns `403`, and private
+  customer photographs return `401`.
+- Admin can access Admin pages and staff notifications, is redirected away
+  from Agent and Customer sections, can generate a real Excel report, and is
+  authorized at the private-photo boundary.
+- Agent can access the Agent dashboard and staff notifications, is redirected
+  away from Admin and Customer sections, cannot export Admin reports, and
+  receives the non-enumerating response from the private-photo endpoint.
+- Customer can access the Customer dashboard, is redirected away from Admin,
+  Agent, and staff Notifications sections, cannot export Admin reports, and
+  receives the non-enumerating response from the private-photo endpoint.
+- Global CSP, anti-clickjacking, `nosniff`, referrer, permissions, opener, and
+  HSTS protections are present on the deployed application. Authenticated
+  application responses remain private and non-cacheable.
+- The manifest, service worker, and public offline document load successfully;
+  the public shell is the only application cache and browser storage contains
+  no financial or authenticated records.
+- The deployed Admin dashboard has no page-level horizontal overflow at a
+  390-pixel mobile viewport. Lighthouse snapshot scores are 100 for
+  accessibility, best practices, SEO, and agentic browsing.
+
+The Admin browser session used for the test was revoked through the existing
+session-version control after verification. Agent and Customer checks used
+short-lived signed test sessions without reading or changing their passwords;
+their isolated browser contexts and temporary session material were destroyed
+after the checks completed. Passwords, account profiles, and financial history
+remain unchanged; the Admin must sign in once with the existing password after
+the deliberate test-session revocation.
