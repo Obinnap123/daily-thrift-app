@@ -1,17 +1,20 @@
 "use client";
 
 /**
- * Search + optional status filter bar for list pages (Agents, Customers).
- * ----------------------------------------------------------------------------
- * Debounces the search text (300ms) and pushes it into the URL as `?q=...`
- * (and `?status=...` if a status filter is configured) using
- * `router.replace` — filtering happens server-side (in the page's Server
- * Component, via the repository's `where` clause), this component only
- * manages the URL state. Changing the search term always resets `page`
- * back to 1 so you don't land on an empty "page 3 of 1".
+ * Search + optional status filter bar for server-rendered list pages.
+ * Search is debounced for speed but also has an explicit submit action so the
+ * interaction remains obvious on mobile and with assistive technology.
  */
-import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
+import { cn } from "@/lib/utils";
 
 interface StatusOption {
   value: string;
@@ -20,7 +23,7 @@ interface StatusOption {
 
 interface SearchFilterBarProps {
   placeholder?: string;
-  /** If provided, renders a status <select> alongside the search input. */
+  /** If provided, renders a status select alongside the search input. */
   statusOptions?: StatusOption[];
 }
 
@@ -31,51 +34,82 @@ export function SearchFilterBar({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-
   const [query, setQuery] = useState(searchParams.get("q") ?? "");
+  const [isPending, startTransition] = useTransition();
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  function pushParams(next: Record<string, string | undefined>) {
-    const params = new URLSearchParams(searchParams.toString());
-    for (const [key, value] of Object.entries(next)) {
-      if (value) params.set(key, value);
-      else params.delete(key);
-    }
-    // Any filter change invalidates the current page number.
-    params.delete("page");
-    router.replace(`${pathname}?${params.toString()}`);
-  }
+  const pushParams = useCallback(
+    (next: Record<string, string | undefined>) => {
+      const params = new URLSearchParams(searchParams.toString());
+      for (const [key, value] of Object.entries(next)) {
+        if (value) params.set(key, value);
+        else params.delete(key);
+      }
+      // A filter change invalidates the current page number.
+      params.delete("page");
+      const nextSearch = params.toString();
+      startTransition(() => {
+        router.replace(nextSearch ? `${pathname}?${nextSearch}` : pathname, {
+          scroll: false,
+        });
+      });
+    },
+    [pathname, router, searchParams]
+  );
+
+  const applySearch = useCallback(() => {
+    const normalizedQuery = query.trim();
+    if (normalizedQuery === (searchParams.get("q") ?? "")) return;
+    pushParams({ q: normalizedQuery || undefined });
+  }, [pushParams, query, searchParams]);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      pushParams({ q: query || undefined });
-    }, 300);
+    debounceRef.current = setTimeout(applySearch, 300);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query]);
+  }, [applySearch, query]);
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    applySearch();
+  }
 
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-      <div className="relative flex-1 sm:max-w-xs">
+    <form
+      role="search"
+      aria-label="Search and filter records"
+      aria-busy={isPending}
+      onSubmit={handleSubmit}
+      className={cn(
+        "grid min-w-0 gap-3 sm:items-center",
+        statusOptions
+          ? "sm:grid-cols-[minmax(0,20rem)_12rem_auto]"
+          : "sm:grid-cols-[minmax(0,20rem)_auto]"
+      )}
+    >
+      <div className="relative min-w-0">
         <input
           type="search"
+          name="q"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder={placeholder}
           aria-label="Search"
-          className="min-h-11 w-full rounded-xl border border-line-strong bg-surface px-3.5 py-2.5 text-sm text-ink shadow-sm placeholder:text-ink-subtle focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/25"
+          className="min-h-11 min-w-0 w-full max-w-full rounded-xl border border-line-strong bg-surface px-3.5 py-2.5 text-base text-ink shadow-sm placeholder:text-ink-subtle focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/25 sm:text-sm"
         />
       </div>
 
       {statusOptions && (
         <select
           aria-label="Filter by status"
-          defaultValue={searchParams.get("status") ?? ""}
-          onChange={(event) => pushParams({ status: event.target.value || undefined })}
-          className="min-h-11 rounded-xl border border-line-strong bg-surface px-3.5 py-2.5 text-sm text-ink shadow-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/25 sm:w-48"
+          value={searchParams.get("status") ?? ""}
+          onChange={(event) =>
+            pushParams({ status: event.target.value || undefined })
+          }
+          className="min-h-11 min-w-0 w-full max-w-full rounded-xl border border-line-strong bg-surface px-3.5 py-2.5 text-base text-ink shadow-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/25 sm:text-sm"
         >
           <option value="">All statuses</option>
           {statusOptions.map((option) => (
@@ -85,6 +119,18 @@ export function SearchFilterBar({
           ))}
         </select>
       )}
-    </div>
+
+      <button
+        type="submit"
+        disabled={isPending}
+        className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-brand-solid px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-solid-hover focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2 focus:ring-offset-canvas disabled:cursor-wait disabled:opacity-70 sm:w-auto"
+      >
+        {isPending ? "Searching…" : "Search"}
+      </button>
+
+      <span className="sr-only" role="status" aria-live="polite">
+        {isPending ? "Updating search results" : ""}
+      </span>
+    </form>
   );
 }

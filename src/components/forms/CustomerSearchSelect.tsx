@@ -42,6 +42,7 @@ export function CustomerSearchSelect({
   const [isOpen, setIsOpen] = useState(false);
   const [remoteOptions, setRemoteOptions] = useState<CustomerSearchOption[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const selected = [...options, ...remoteOptions].find((option) => option.id === value) ?? null;
@@ -63,7 +64,14 @@ export function CustomerSearchSelect({
     const timer = setTimeout(() => {
       setIsLoading(true);
       void onSearch(query)
-        .then((result) => { if (active) setRemoteOptions(result); })
+        .then((result) => {
+          if (active) setRemoteOptions(result);
+        })
+        .catch(() => {
+          if (!active) return;
+          setRemoteOptions([]);
+          setSearchError("Customer search is temporarily unavailable. Please try again.");
+        })
         .finally(() => { if (active) setIsLoading(false); });
     }, 250);
     return () => { active = false; clearTimeout(timer); };
@@ -83,7 +91,7 @@ export function CustomerSearchSelect({
   }, []);
 
   return (
-    <div ref={containerRef} className="relative flex flex-col gap-1.5">
+    <div ref={containerRef} className="relative flex min-w-0 max-w-full flex-col gap-1.5">
       <label htmlFor="customer-search-input" className="text-sm font-medium text-ink">
         Customer
       </label>
@@ -95,11 +103,15 @@ export function CustomerSearchSelect({
         onFocus={() => {
           setIsOpen(true);
           setQuery("");
+          setSearchError(null);
         }}
-        onChange={(event) => setQuery(event.target.value)}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          setSearchError(null);
+        }}
         placeholder={placeholder}
         className={cn(
-          "min-h-11 w-full rounded-xl border bg-surface px-3.5 py-2.5 text-sm text-ink shadow-sm",
+          "min-h-11 min-w-0 w-full max-w-full rounded-xl border bg-surface px-3.5 py-2.5 text-base text-ink shadow-sm sm:text-sm",
           "placeholder:text-ink-subtle focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/25",
           error ? "border-danger" : "border-line-strong"
         )}
@@ -107,18 +119,30 @@ export function CustomerSearchSelect({
         role="combobox"
         aria-expanded={isOpen}
         aria-controls="customer-search-listbox"
+        aria-autocomplete="list"
+        aria-describedby={searchError ? "customer-search-error" : undefined}
       />
 
       {isOpen && (
         <ul
           id="customer-search-listbox"
           role="listbox"
-          className="absolute top-full z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-xl border border-line bg-surface-raised py-1 shadow-xl"
+          className="absolute top-full z-10 mt-1 max-h-60 min-w-0 w-full max-w-full overflow-y-auto rounded-xl border border-line bg-surface-raised py-1 shadow-xl"
         >
-          {isLoading ? (
+          {searchError ? (
+            <li
+              id="customer-search-error"
+              className="px-3.5 py-3 text-sm text-danger"
+              role="alert"
+            >
+              {searchError}
+            </li>
+          ) : isLoading ? (
             <li className="px-3.5 py-3 text-sm text-ink-muted" role="status">Searching customers…</li>
           ) : visibleOptions.length === 0 ? (
-            <li className="px-3.5 py-3 text-sm text-ink-muted">No active customers match.</li>
+            <li className="px-3.5 py-3 text-sm text-ink-muted">
+              No customer with a savings plan matches this search.
+            </li>
           ) : (
             visibleOptions.map((option) => (
               <li key={option.id} role="option" aria-selected={option.id === value}>

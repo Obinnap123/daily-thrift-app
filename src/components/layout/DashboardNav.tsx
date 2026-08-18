@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { cn } from "@/lib/utils";
 import { navigationForPath, type AppNavigationItem } from "@/components/layout/navigation";
+import { useNavigationProgress } from "@/components/providers/NavigationProgressProvider";
 
 export interface NavLink { href: string; label: string }
 
@@ -102,10 +103,22 @@ function SidebarContent({ links, pathname, onClose }: { links: AppNavigationItem
 
 function NavigationLink({ link, pathname }: { link: AppNavigationItem; pathname: string }) {
   const active = isNavigationLinkActive(pathname, link.href);
+  const { startNavigation } = useNavigationProgress();
+
   return (
     <Link
       href={link.href}
       aria-current={active ? "page" : undefined}
+      onClick={(event) => {
+        const opensCurrentTab =
+          event.button === 0 &&
+          !event.metaKey &&
+          !event.ctrlKey &&
+          !event.shiftKey &&
+          !event.altKey;
+
+        if (!active && opensCurrentTab) startNavigation();
+      }}
       className={cn(
         "flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand",
         active ? "bg-brand-soft text-brand-ink" : "text-ink-muted hover:bg-surface-hover hover:text-ink"

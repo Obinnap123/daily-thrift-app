@@ -47,8 +47,10 @@ export async function lockCustomerFinancialState(
   tx: Prisma.TransactionClient,
   customerProfileId: string,
 ): Promise<void> {
-  await tx.$queryRaw`
-    SELECT pg_advisory_xact_lock(hashtextextended(${`customer:${customerProfileId}`}, 0))
+  await tx.$queryRaw<{ lockResult: string }[]>`
+    SELECT pg_advisory_xact_lock(
+      hashtextextended(${`customer:${customerProfileId}`}, 0)
+    )::text AS "lockResult"
   `;
 }
 
@@ -59,7 +61,9 @@ export async function lockReconciliationState(
   reconciliationDate: Date,
 ): Promise<void> {
   const day = reconciliationDate.toISOString().slice(0, 10);
-  await tx.$queryRaw`
-    SELECT pg_advisory_xact_lock(hashtextextended(${`reconciliation:${agentId}:${day}`}, 0))
+  await tx.$queryRaw<{ lockResult: string }[]>`
+    SELECT pg_advisory_xact_lock(
+      hashtextextended(${`reconciliation:${agentId}:${day}`}, 0)
+    )::text AS "lockResult"
   `;
 }

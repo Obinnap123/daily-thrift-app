@@ -81,7 +81,6 @@ export default async function AdminDashboardPage() {
           <StatCard label="Collections Today" value={`₦${totalToday.toLocaleString()}`} />
           <StatCard label="Collections This Week" value={`₦${totalWeek.toLocaleString()}`} />
           <StatCard label="Collections This Month" value={`₦${totalMonth.toLocaleString()}`} />
-          <StatCard label="Due For Payout" value={dueForPayout.length} tone="amber" />
         </div>
 
         <Card>

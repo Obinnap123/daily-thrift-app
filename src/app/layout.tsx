@@ -4,6 +4,7 @@ import "./globals.css";
 import { SessionProvider } from "@/components/providers/SessionProvider";
 import { ToastProvider } from "@/components/providers/ToastProvider";
 import { PwaServiceWorker } from "@/components/providers/PwaServiceWorker";
+import { NavigationProgressProvider } from "@/components/providers/NavigationProgressProvider";
 import { InstallPrompt } from "@/components/pwa/InstallPrompt";
 
 const geistSans = Geist({
@@ -58,6 +59,9 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
   themeColor: [
     {
       media: "(prefers-color-scheme: light)",
@@ -88,8 +92,10 @@ export default function RootLayout({
             show a success/error notification. */}
         <SessionProvider>
           <ToastProvider>
-            {children}
-            <InstallPrompt />
+            <NavigationProgressProvider>
+              {children}
+              <InstallPrompt />
+            </NavigationProgressProvider>
           </ToastProvider>
         </SessionProvider>
       </body>

@@ -59,8 +59,8 @@ export function ReportFilterForm({
 
   return (
     <Card>
-      <form method="GET" action="/admin/reports" className="flex flex-wrap items-end gap-4">
-        <div className="w-full sm:w-48">
+      <form method="GET" action="/admin/reports" className="flex min-w-0 flex-col items-stretch gap-4 sm:flex-row sm:flex-wrap sm:items-end">
+        <div className="min-w-0 max-w-full sm:w-48">
           <Select
             label="Report type"
             name="type"
@@ -76,13 +76,13 @@ export function ReportFilterForm({
         </div>
 
         {showAnchorDate && (
-          <div className="w-full sm:w-48">
+          <div className="min-w-0 max-w-full sm:w-48">
             <Input label="Date" type="date" name="date" defaultValue={date} />
           </div>
         )}
 
         {showAgentPicker && (
-          <div className="w-full sm:w-56">
+          <div className="min-w-0 max-w-full sm:w-56">
             <Select label="Agent" name="agentId" defaultValue={agentId ?? ""}>
               <option value="">Select an agent…</option>
               {activeAgents.map((agent) => (
@@ -95,7 +95,7 @@ export function ReportFilterForm({
         )}
 
         {showCustomerSearch && (
-          <div className="w-full sm:w-56">
+          <div className="min-w-0 max-w-full sm:w-56">
             <Input
               label="Customer name or code"
               name="customerSearch"
@@ -107,16 +107,16 @@ export function ReportFilterForm({
 
         {showDateRange && (
           <>
-            <div className="w-full sm:w-40">
+            <div className="min-w-0 max-w-full sm:w-40">
               <Input label="From (optional)" type="date" name="start" defaultValue={start} />
             </div>
-            <div className="w-full sm:w-40">
+            <div className="min-w-0 max-w-full sm:w-40">
               <Input label="To (optional)" type="date" name="end" defaultValue={end} />
             </div>
           </>
         )}
 
-        <Button type="submit">Run Report</Button>
+        <Button type="submit" className="w-full sm:w-auto">Run Report</Button>
       </form>
     </Card>
   );

@@ -48,6 +48,7 @@ import {
   createAuditLog,
   type AuditActorContext,
 } from "@/server/services/audit.service";
+import { calculateContributionAllocation } from "@/lib/contribution-allocation";
 
 type PlanForAllocation = {
   id: string;
@@ -88,9 +89,11 @@ async function allocateCollectedAmount(
   amount: number
 ) {
   const dailyAmount = Number(plan.dailyAmount);
-  const available = Number(plan.creditBalance) + amount;
-  const fullSlots = Math.floor((available + Number.EPSILON) / dailyAmount);
-  const creditBalance = Number((available - fullSlots * dailyAmount).toFixed(2));
+  const { fullSlots, creditBalance } = calculateContributionAllocation(
+    dailyAmount,
+    Number(plan.creditBalance),
+    amount,
+  );
   const firstDate = plan.nextCoverageDate ?? plan.startDate;
 
   if (fullSlots > 0) {

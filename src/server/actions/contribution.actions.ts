@@ -36,6 +36,7 @@ import {
   writeRequiredAuditLog,
   writeAuditLog,
 } from "@/server/services/audit.service";
+import { quickPayRevalidationPaths } from "@/lib/contribution-revalidation";
 
 export async function searchQuickPayCustomersAction(query: string) {
   const user = await requireRole(["ADMIN", "AGENT"]);
@@ -44,7 +45,9 @@ export async function searchQuickPayCustomersAction(query: string) {
     where: {
       ...(user.role === "AGENT" ? { assignedAgentId: user.id } : {}),
       user: { isActive: true },
-      contributionPlans: { some: { status: "ACTIVE" } },
+      // Include customers whose previous period was paid out: their next
+      // successful payment automatically starts the next savings period.
+      contributionPlans: { some: {} },
       ...(search ? { OR: [
         { customerCode: { contains: search, mode: "insensitive" } },
         { user: { name: { contains: search, mode: "insensitive" } } },
@@ -163,7 +166,22 @@ export async function recordQuickPayAction(input: QuickPayInput) {
 
   const requestContext = await getAuditRequestContext();
   const audit = { actorId: user!.id, actorRole: user!.role, ...requestContext };
-  const result = await recordQuickPay(input, user!.id, user!.role === "ADMIN", audit);
+  let result: Awaited<ReturnType<typeof recordQuickPay>>;
+  try {
+    result = await recordQuickPay(input, user!.id, user!.role === "ADMIN", audit);
+  } catch (error) {
+    console.error("Quick Pay failed before completion", error);
+    await writeRequiredAuditLog({
+      actorId: user!.id,
+      actorRole: user!.role,
+      action: "QUICK_PAY",
+      outcome: "FAILURE",
+      entityType: "CustomerProfile",
+      entityId: input.customerProfileId,
+      summary: "Quick Pay failed due to an unexpected server error.",
+    }, requestContext);
+    return fail("Payment could not be recorded. No money was added. Please try again.");
+  }
 
   if (!result.success) {
     await writeRequiredAuditLog({
@@ -178,15 +196,9 @@ export async function recordQuickPayAction(input: QuickPayInput) {
   }
 
   if (result.success) {
-    revalidatePath("/agent");
-    revalidatePath("/agent/collections");
-    revalidatePath("/admin");
-    revalidatePath(`/admin/customers/${input.customerProfileId}`);
-    revalidatePath(`/agent/customers/${input.customerProfileId}`);
-    revalidatePath("/admin/payouts");
-    revalidatePath("/customer");
-    revalidatePath("/admin/tracking");
-    revalidatePath("/agent/tracking");
+    for (const path of quickPayRevalidationPaths(input.customerProfileId)) {
+      revalidatePath(path);
+    }
   }
 
   return result;

@@ -14,7 +14,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
   ({ className, label, error, id, ...props }, ref) => {
     const inputId = id ?? props.name;
     return (
-      <div className="flex flex-col gap-1.5">
+      <div className="flex min-w-0 max-w-full flex-col gap-1.5">
         {label && (
           <label htmlFor={inputId} className="text-sm font-medium text-ink">
             {label}
@@ -24,7 +24,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           ref={ref}
           id={inputId}
           className={cn(
-            "min-h-11 w-full rounded-xl border bg-surface px-3.5 py-2.5 text-sm text-ink shadow-sm",
+            "min-h-11 min-w-0 max-w-full w-full rounded-xl border bg-surface px-3.5 py-2.5 text-base text-ink shadow-sm sm:text-sm",
             "placeholder:text-ink-subtle",
             "focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/25",
             error ? "border-danger" : "border-line-strong",

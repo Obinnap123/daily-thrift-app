@@ -85,7 +85,7 @@ export function QuickPayModal({
     defaultValues: {
       customerProfileId: initialCustomerProfileId ?? "",
       paymentMethod: "CASH",
-      paymentDate: new Date(format(new Date(), "yyyy-MM-dd")),
+      paymentDate: format(new Date(), "yyyy-MM-dd"),
       isOverride: false,
     },
   });
@@ -100,7 +100,7 @@ export function QuickPayModal({
       reset({
         customerProfileId: initialCustomerProfileId ?? "",
         paymentMethod: "CASH",
-        paymentDate: new Date(format(new Date(), "yyyy-MM-dd")),
+        paymentDate: format(new Date(), "yyyy-MM-dd"),
         isOverride: false,
         amount: undefined,
         note: "",
@@ -152,7 +152,16 @@ export function QuickPayModal({
   async function onSubmit(data: QuickPayInput) {
     setFormError(null);
 
-    const result = await recordQuickPayAction(data);
+    let result: Awaited<ReturnType<typeof recordQuickPayAction>>;
+    try {
+      result = await recordQuickPayAction(data);
+    } catch {
+      const message =
+        "Payment could not be recorded. No money was added. Please check your connection and try again.";
+      setFormError(message);
+      showToast({ type: "error", message });
+      return;
+    }
 
     if (!result.success) {
       setFormError(result.message);
