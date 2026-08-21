@@ -133,6 +133,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           return rejectLogin("Sign-in rejected: account is inactive.", user);
         }
 
+        if ((user.role === "ADMIN" || user.role === "AGENT") && !user.emailVerifiedAt) {
+          return rejectLogin("Sign-in rejected: staff email is not verified.", user);
+        }
+
         if (!isValidPassword) {
           return rejectLogin("Sign-in rejected: invalid credentials.", user);
         }

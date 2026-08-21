@@ -45,16 +45,22 @@ const passwordField = z
  * Agent creation form (Admin only).
  * Agents log in with email, so email is required here.
  */
-export const createAgentSchema = z
+export const createAgentSchema = z.object({
+  name: z.string().trim().min(2, "Name must be at least 2 characters"),
+  email: z.string().trim().toLowerCase().email("Enter a valid email address"),
+  phone: z
+    .string()
+    .trim()
+    .regex(/^[0-9+\s-]{7,15}$/, "Enter a valid phone number")
+    .optional()
+    .or(z.literal("")),
+});
+
+export type CreateAgentInput = z.infer<typeof createAgentSchema>;
+
+export const completeAgentInvitationSchema = z
   .object({
-    name: z.string().trim().min(2, "Name must be at least 2 characters"),
-    email: z.string().trim().toLowerCase().email("Enter a valid email address"),
-    phone: z
-      .string()
-      .trim()
-      .regex(/^[0-9+\s-]{7,15}$/, "Enter a valid phone number")
-      .optional()
-      .or(z.literal("")),
+    token: z.string().min(32, "This invitation link is invalid"),
     password: passwordField,
     confirmPassword: z.string(),
   })
@@ -63,7 +69,7 @@ export const createAgentSchema = z
     path: ["confirmPassword"],
   });
 
-export type CreateAgentInput = z.infer<typeof createAgentSchema>;
+export type CompleteAgentInvitationInput = z.infer<typeof completeAgentInvitationSchema>;
 
 /**
  * Agent edit form (Admin only). Same shape as creation, minus password —

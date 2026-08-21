@@ -349,6 +349,20 @@ pm2 restart webapp --update-env  # Restart via PM2 after a new build
 pm2 logs webapp --nostream       # Check logs without blocking
 ```
 
+### Staff email verification (Resend)
+
+Set these server-side environment variables in Vercel before inviting a new Agent:
+
+```text
+APP_URL=https://your-production-domain.example
+RESEND_API_KEY=re_your_private_api_key
+RESEND_FROM_EMAIL=Davchuks Daily Thrift <accounts@your-verified-domain.example>
+```
+
+The Admin creates an Agent with name, email, and optional phone only. The Agent receives a
+single-use 48-hour link, verifies ownership of the email, and creates their own password. Existing
+Admin and Agent accounts are marked verified by the migration so current users are not locked out.
+
 ## Report & Export API
 - `GET /admin/reports?type=daily|weekly|monthly|agent|customer|payout&date=YYYY-MM-DD&start=YYYY-MM-DD&end=YYYY-MM-DD&agentId=...&customerSearch=...`
   — the on-screen Reports page (Admin-only; enforced by `requireRole("ADMIN")`

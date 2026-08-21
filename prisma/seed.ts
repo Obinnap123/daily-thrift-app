@@ -39,6 +39,7 @@ async function main() {
       email,
       passwordHash,
       role: "ADMIN",
+      emailVerifiedAt: new Date(),
     },
   });
 

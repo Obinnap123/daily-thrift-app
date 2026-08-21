@@ -69,6 +69,7 @@ export function LoginForm({ role }: LoginFormProps) {
   const [formError, setFormError] = useState<string | null>(null);
   const [isRedirecting, setIsRedirecting] = useState(false);
   const fieldConfig = ROLE_FIELD_CONFIG[role];
+  const emailVerified = role === "agent" && searchParams.get("verified") === "1";
 
   const {
     register,
@@ -106,6 +107,11 @@ export function LoginForm({ role }: LoginFormProps) {
     <Card>
       <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4" noValidate aria-busy={isSubmitting || isRedirecting}>
         <input type="hidden" {...register("portalRole")} />
+        {emailVerified && (
+          <p role="status" className="rounded-xl bg-brand-soft px-3 py-2 text-sm text-brand-ink">
+            Email verified successfully. Sign in with the password you just created.
+          </p>
+        )}
         <Input
           label={fieldConfig.label}
           type={fieldConfig.type}

@@ -55,7 +55,14 @@ export function EditAgentForm({ agent }: EditAgentFormProps) {
       return;
     }
 
-    showToast({ type: "success", message: "Agent details updated." });
+    showToast({
+      type: result.data.emailChanged && !result.data.invitationSent ? "info" : "success",
+      message: result.data.emailChanged
+        ? result.data.invitationSent
+          ? "Agent updated. A verification email was sent to the new address."
+          : "Agent updated, but verification email delivery failed. Use Resend Verification Email."
+        : "Agent details updated.",
+    });
     router.refresh();
   }
 

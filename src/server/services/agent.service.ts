@@ -16,6 +16,8 @@ import {
 import { findUserByEmail, findUserByPhone } from "@/server/repositories/user.repository";
 import { findAgentById } from "@/server/repositories/agent.repository";
 import { ok, fail, type ActionResult } from "@/lib/action-result";
+import { randomBytes } from "node:crypto";
+import { createStaffVerificationToken } from "@/lib/staff-verification-token";
 
 /**
  * Create a new Agent account. Only an Admin should ever call this — the
@@ -23,13 +25,18 @@ import { ok, fail, type ActionResult } from "@/lib/action-result";
  * before invoking this function; this function itself does not re-check
  * the caller's role since it has no access to the request/session.
  */
-export async function createAgent(input: CreateAgentInput): Promise<ActionResult<{ id: string }>> {
+export async function createAgent(input: CreateAgentInput): Promise<ActionResult<{
+  id: string;
+  name: string;
+  email: string;
+  invitationToken: string;
+}>> {
   const parsed = createAgentSchema.safeParse(input);
   if (!parsed.success) {
     return fail("Please correct the highlighted fields.");
   }
 
-  const { name, email, phone, password } = parsed.data;
+  const { name, email, phone } = parsed.data;
   const normalizedPhone = phone ? normalizePhone(phone) : null;
 
   // Friendly, field-specific duplicate checks (rather than letting a raw
@@ -50,20 +57,32 @@ export async function createAgent(input: CreateAgentInput): Promise<ActionResult
     }
   }
 
-  const passwordHash = await hashPassword(password);
+  const passwordHash = await hashPassword(randomBytes(32).toString("base64url"));
+  const invitation = createStaffVerificationToken();
 
-  const agent = await prisma.user.create({
-    data: {
-      name,
-      email,
-      phone: normalizedPhone,
-      passwordHash,
-      role: "AGENT",
-    },
-    select: { id: true },
+  const agent = await prisma.$transaction(async (tx) => {
+    const created = await tx.user.create({
+      data: {
+        name,
+        email,
+        phone: normalizedPhone,
+        passwordHash,
+        role: "AGENT",
+        emailVerifiedAt: null,
+      },
+      select: { id: true, name: true, email: true },
+    });
+    await tx.staffEmailVerificationToken.create({
+      data: {
+        userId: created.id,
+        tokenHash: invitation.tokenHash,
+        expiresAt: invitation.expiresAt,
+      },
+    });
+    return created;
   });
 
-  return ok(agent);
+  return ok({ ...agent, email: agent.email!, invitationToken: invitation.token });
 }
 
 /**
@@ -71,7 +90,13 @@ export async function createAgent(input: CreateAgentInput): Promise<ActionResult
  * Password changes are intentionally out of scope here (a separate,
  * deliberate "reset password" action belongs in a later step).
  */
-export async function updateAgent(input: EditAgentInput): Promise<ActionResult<{ id: string }>> {
+export async function updateAgent(input: EditAgentInput): Promise<ActionResult<{
+  id: string;
+  name: string;
+  email: string;
+  emailChanged: boolean;
+  invitationToken: string | null;
+}>> {
   const parsed = editAgentSchema.safeParse(input);
   if (!parsed.success) {
     return fail("Please correct the highlighted fields.");
@@ -104,22 +129,39 @@ export async function updateAgent(input: EditAgentInput): Promise<ActionResult<{
     }
   }
 
-  const agent = await prisma.user.update({
-    where: { id },
-    data: {
-      name,
-      email,
-      phone: normalizedPhone,
-      // Email is this role's login identifier. Changing it must revoke JWTs
-      // issued under the previous credential identity.
-      ...(email !== existingAgent.email
-        ? { sessionVersion: { increment: 1 } }
-        : {}),
-    },
-    select: { id: true },
+  const emailChanged = email !== existingAgent.email;
+  const invitation = emailChanged ? createStaffVerificationToken() : null;
+  const agent = await prisma.$transaction(async (tx) => {
+    const updated = await tx.user.update({
+      where: { id },
+      data: {
+        name,
+        email,
+        phone: normalizedPhone,
+        // A changed login email must be verified again and all sessions
+        // issued for the previous email are revoked immediately.
+        ...(emailChanged
+          ? { sessionVersion: { increment: 1 }, emailVerifiedAt: null }
+          : {}),
+      },
+      select: { id: true, name: true, email: true },
+    });
+    if (invitation) {
+      await tx.staffEmailVerificationToken.upsert({
+        where: { userId: id },
+        create: { userId: id, tokenHash: invitation.tokenHash, expiresAt: invitation.expiresAt },
+        update: { tokenHash: invitation.tokenHash, expiresAt: invitation.expiresAt, createdAt: new Date() },
+      });
+    }
+    return updated;
   });
 
-  return ok(agent);
+  return ok({
+    ...agent,
+    email: agent.email!,
+    emailChanged,
+    invitationToken: invitation?.token ?? null,
+  });
 }
 
 /**

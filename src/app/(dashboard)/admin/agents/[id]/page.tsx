@@ -19,6 +19,7 @@ import { EditAgentForm } from "@/components/forms/EditAgentForm";
 import { ToggleAgentActiveButton } from "@/components/forms/ToggleAgentActiveButton";
 import { AssignCustomersForm } from "@/components/forms/AssignCustomersForm";
 import Link from "next/link";
+import { ResendAgentInvitationButton } from "@/components/forms/ResendAgentInvitationButton";
 
 const ADMIN_NAV_LINKS = [
   { href: "/admin", label: "Overview" },
@@ -56,8 +57,8 @@ export default async function AdminAgentDetailPage({
               Agent profile, status, and customer assignment
             </p>
           </div>
-          <Badge tone={agent.isActive ? "green" : "red"}>
-            {agent.isActive ? "Active" : "Inactive"}
+          <Badge tone={!agent.emailVerifiedAt ? "amber" : agent.isActive ? "green" : "red"}>
+            {!agent.emailVerifiedAt ? "Verification pending" : agent.isActive ? "Active" : "Inactive"}
           </Badge>
         </div>
 
@@ -78,10 +79,13 @@ export default async function AdminAgentDetailPage({
               Account Status
             </h3>
             <p className="mb-4 text-sm text-gray-600">
-              {agent.isActive
+              {!agent.emailVerifiedAt
+                ? "This agent must verify their email and create a password before they can sign in or receive customer assignments."
+                : agent.isActive
                 ? "This agent can currently log in and manage their customers."
                 : "This agent is deactivated and cannot log in until reactivated."}
             </p>
+            {!agent.emailVerifiedAt && <div className="mb-4"><ResendAgentInvitationButton agentId={agent.id} /></div>}
             <ToggleAgentActiveButton
               agentId={agent.id}
               isActive={agent.isActive}
@@ -94,7 +98,13 @@ export default async function AdminAgentDetailPage({
             <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-500">
               Assign Customers to This Agent
             </h3>
-            <AssignCustomersForm agentId={agent.id} candidates={unassignedCandidates} />
+            {agent.emailVerifiedAt ? (
+              <AssignCustomersForm agentId={agent.id} candidates={unassignedCandidates} />
+            ) : (
+              <p className="rounded-xl bg-warning-soft px-3 py-2 text-sm text-warning">
+                Customer assignment is available after this agent verifies their email.
+              </p>
+            )}
           </Card>
 
           {/* Currently managed customers */}

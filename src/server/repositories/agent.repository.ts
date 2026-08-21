@@ -20,7 +20,7 @@ export interface AgentOption {
 /** List all active agents, alphabetically — used to populate dropdowns. */
 export async function listActiveAgents(): Promise<AgentOption[]> {
   return prisma.user.findMany({
-    where: { role: "AGENT", isActive: true },
+    where: { role: "AGENT", isActive: true, emailVerifiedAt: { not: null } },
     select: { id: true, name: true, email: true },
     orderBy: { name: "asc" },
   });
@@ -75,6 +75,7 @@ export async function listAgentsPaginated(options: ListAgentsOptions = {}) {
         email: true,
         phone: true,
         isActive: true,
+        emailVerifiedAt: true,
         createdAt: true,
         _count: { select: { managedCustomers: true } },
       },

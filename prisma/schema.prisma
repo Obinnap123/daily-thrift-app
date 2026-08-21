@@ -123,6 +123,9 @@ model User {
   sessionVersion Int     @default(0)
   /// Timestamp of the last successful login, useful for admin oversight.
   lastLoginAt  DateTime?
+  /// Staff must prove they control their login email before signing in.
+  /// Customer accounts use phone login and do not require this field.
+  emailVerifiedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -169,6 +172,7 @@ model User {
   notifications Notification[]
   auditLogs     AuditLog[]
   missingPaymentReportsReviewed MissingPaymentReport[] @relation("MissingPaymentReportReviewedBy")
+  staffEmailVerificationToken StaffEmailVerificationToken?
 
   @@index([role])
   @@map("users")
@@ -616,6 +620,21 @@ model AuditLog {
   @@index([actorId, createdAt])
   @@index([action, outcome])
   @@map("audit_logs")
+}
+
+/// Single-use, hashed invitation token for a staff email address. Only the
+/// raw token sent by email can complete verification; the database stores
+/// its SHA-256 digest so a database read cannot reveal usable invite links.
+model StaffEmailVerificationToken {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+  @@map("staff_email_verification_tokens")
 }
 
 /// A customer-raised concern that money they handed over is not reflected in

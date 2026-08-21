@@ -83,6 +83,11 @@ export async function registerCustomer(
       assignedAgentId: "This agent is inactive.",
     });
   }
+  if (!agent.emailVerifiedAt) {
+    return fail("The selected agent has not verified their email yet.", {
+      assignedAgentId: "Choose an agent whose email is verified.",
+    });
+  }
 
   const passwordHash = await hashPassword(password);
 
@@ -222,6 +227,9 @@ export async function bulkAssignCustomersToAgent(
   if (!agent.isActive) {
     return fail("Cannot assign customers to an inactive agent.");
   }
+  if (!agent.emailVerifiedAt) {
+    return fail("Cannot assign customers until the agent verifies their email.");
+  }
 
   const customers = await prisma.customerProfile.findMany({
     where: { id: { in: customerProfileIds } },
@@ -291,6 +299,11 @@ export async function reassignCustomerAgent(
   if (!newAgent.isActive) {
     return fail("The selected agent is currently inactive. Choose another agent.", {
       newAgentId: "This agent is inactive.",
+    });
+  }
+  if (!newAgent.emailVerifiedAt) {
+    return fail("The selected agent has not verified their email yet.", {
+      newAgentId: "Choose an agent whose email is verified.",
     });
   }
 

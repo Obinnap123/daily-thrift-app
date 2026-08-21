@@ -94,8 +94,8 @@ export default async function AdminAgentsPage({ searchParams }: AdminAgentsPageP
                     <td className="px-4 py-3 text-gray-600">{agent.phone ?? "—"}</td>
                     <td className="px-4 py-3 text-gray-600">{agent._count.managedCustomers}</td>
                     <td className="px-4 py-3">
-                      <Badge tone={agent.isActive ? "green" : "red"}>
-                        {agent.isActive ? "Active" : "Inactive"}
+                      <Badge tone={!agent.emailVerifiedAt ? "amber" : agent.isActive ? "green" : "red"}>
+                        {!agent.emailVerifiedAt ? "Verification pending" : agent.isActive ? "Active" : "Inactive"}
                       </Badge>
                     </td>
                     <td className="px-4 py-3 text-right">

@@ -17,6 +17,14 @@ import {
   reviewMissingPaymentReportSchema,
   submitMissingPaymentReportSchema,
 } from "../src/validations/missing-payment-report";
+import {
+  completeAgentInvitationSchema,
+  createAgentSchema,
+} from "../src/validations/auth";
+import {
+  createStaffVerificationToken,
+  hashStaffVerificationToken,
+} from "../src/lib/staff-verification-token";
 
 test("Quick Pay accepts a native date-input value and converts it to a Date", () => {
   const result = quickPaySchema.parse({
@@ -150,6 +158,40 @@ test("closing a missing-payment report requires an admin review note", () => {
     decision: "DISMISSED",
     reviewNote: "",
   }).success, false);
+});
+
+test("an Admin creates an Agent invitation without choosing the Agent's password", () => {
+  const result = createAgentSchema.safeParse({
+    name: "Verified Agent",
+    email: "AGENT@example.com",
+    phone: "0803 123 4567",
+  });
+  assert.equal(result.success, true);
+  if (result.success) assert.equal(result.data.email, "agent@example.com");
+});
+
+test("agent invitation completion enforces the shared password policy", () => {
+  const token = "a".repeat(43);
+  assert.equal(completeAgentInvitationSchema.safeParse({
+    token,
+    password: "StrongPass1",
+    confirmPassword: "StrongPass1",
+  }).success, true);
+  assert.equal(completeAgentInvitationSchema.safeParse({
+    token,
+    password: "weak",
+    confirmPassword: "weak",
+  }).success, false);
+});
+
+test("staff invitation tokens are random, hashed, and expire after 48 hours", () => {
+  const now = new Date("2026-08-21T10:00:00.000Z");
+  const first = createStaffVerificationToken(now);
+  const second = createStaffVerificationToken(now);
+  assert.notEqual(first.token, second.token);
+  assert.equal(first.tokenHash, hashStaffVerificationToken(first.token));
+  assert.notEqual(first.tokenHash, first.token);
+  assert.equal(first.expiresAt.toISOString(), "2026-08-23T10:00:00.000Z");
 });
 
 test("partial money is retained as credit and completes the next slot", () => {
