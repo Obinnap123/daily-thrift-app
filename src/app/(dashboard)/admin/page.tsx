@@ -62,7 +62,7 @@ export default async function AdminDashboardPage() {
   const totalCustomers = userGroups.filter((row) => row.role === "CUSTOMER").reduce((sum, row) => sum + row._count._all, 0);
   const activeCustomers = userGroups.find((row) => row.role === "CUSTOMER" && row.isActive)?._count._all ?? 0;
   const totalAgents = userGroups.filter((row) => row.role === "AGENT").reduce((sum, row) => sum + row._count._all, 0);
-  const { totalToday, totalWeek, totalMonth, missedToday, trackingSeries } = activity;
+  const { totalToday, totalWeek, totalMonth, trackingSeries } = activity;
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -71,13 +71,14 @@ export default async function AdminDashboardPage() {
       <main className="flex-1 space-y-6 p-4 sm:p-6">
         <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
           <StatCard label="Lifetime Collections" value={`₦${financial.lifetimeCollections.toLocaleString()}`} />
+          <StatCard label="Available Balance" value={`₦${financial.availableBalance.toLocaleString()}`} tone="green" />
           <StatCard label="Active Customer Savings" value={`₦${financial.activeSavings.toLocaleString()}`} tone="amber" />
-          <StatCard label="Paid to Customers" value={`₦${financial.paidToCustomers.toLocaleString()}`} tone="green" />
+          <StatCard label="Paid Out Today" value={`₦${financial.paidOutToday.toLocaleString()}`} tone="green" />
+          <StatCard label="Paid Out to Customers — All Time" value={`₦${financial.paidOutToCustomersAllTime.toLocaleString()}`} tone="green" />
           <StatCard label="Commission Earned" value={`₦${financial.commissionEarned.toLocaleString()}`} tone="green" />
           <StatCard label="Total Customers" value={totalCustomers} />
           <StatCard label="Active Customers" value={activeCustomers} tone="green" />
           <StatCard label="Total Agents" value={totalAgents} />
-          <StatCard label="Missed Payments Today" value={missedToday} tone="red" />
           <StatCard label="Collections Today" value={`₦${totalToday.toLocaleString()}`} />
           <StatCard label="Collections This Week" value={`₦${totalWeek.toLocaleString()}`} />
           <StatCard label="Collections This Month" value={`₦${totalMonth.toLocaleString()}`} />

@@ -16,6 +16,7 @@ import {
   getDashboardContributionSummary,
 } from "@/server/repositories/contribution.repository";
 import { today } from "@/lib/date";
+import { getPaidOutByAgentToday } from "@/server/repositories/financial.repository";
 import { DashboardHeader } from "@/components/layout/DashboardHeader";
 import { DashboardNav } from "@/components/layout/DashboardNav";
 import { Card } from "@/components/ui/Card";
@@ -41,14 +42,16 @@ export default async function AgentDashboardPage() {
     activity,
     outstanding,
     activePlansToday,
+    paidOutToday,
   ] = await Promise.all([
     listCustomerProfiles({ agentId: user.id }),
     getDashboardContributionSummary(user.id),
     sumOutstandingForAgent(user.id),
     listActivePlansForAgent(user.id, today()),
+    getPaidOutByAgentToday(user.id),
   ]);
 
-  const todayCounts = { visited: activity.visitedToday, collected: activity.collectedToday, missed: activity.missedToday };
+  const todayCounts = { visited: activity.visitedToday, collected: activity.collectedToday };
   const { totalToday, totalWeek, totalMonth, trackingSeries } = activity;
 
   const activeCustomerCount = myCustomers.filter((c) => c.user.isActive).length;
@@ -92,7 +95,7 @@ export default async function AgentDashboardPage() {
           <StatCard label="Customers Assigned" value={activeCustomerCount} />
           <StatCard label="Visited Today" value={todayCounts.visited} />
           <StatCard label="Collected Today" value={todayCounts.collected} tone="green" />
-          <StatCard label="Missed Today" value={todayCounts.missed} tone="red" />
+          <StatCard label="Paid Out by You Today" value={`₦${paidOutToday.toLocaleString()}`} tone="green" />
           <StatCard label="Total Collected Today" value={`₦${totalToday.toLocaleString()}`} />
           <StatCard label="Total This Week" value={`₦${totalWeek.toLocaleString()}`} />
           <StatCard label="Total This Month" value={`₦${totalMonth.toLocaleString()}`} />

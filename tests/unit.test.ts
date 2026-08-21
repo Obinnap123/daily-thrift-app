@@ -7,6 +7,7 @@ import {
   lockCustomerFinancialState,
   lockReconciliationState,
 } from "../src/lib/financial-transaction";
+import { calculateAvailableBalance } from "../src/lib/financial-metrics";
 
 test("Quick Pay accepts a native date-input value and converts it to a Date", () => {
   const result = quickPaySchema.parse({
@@ -56,6 +57,23 @@ test("allocation rejects invalid financial inputs", () => {
   assert.throws(() => calculateContributionAllocation(0, 0, 500));
   assert.throws(() => calculateContributionAllocation(500, -1, 500));
   assert.throws(() => calculateContributionAllocation(500, 0, 0));
+});
+
+test("available balance subtracts only net customer payouts from lifetime collections", () => {
+  assert.equal(calculateAvailableBalance(100_000, 50_000), 50_000);
+  assert.equal(calculateAvailableBalance(103_000, 50_000), 53_000);
+});
+
+test("available balance keeps commission because it is not part of the customer payout", () => {
+  const lifetimeCollections = 50_000;
+  const customerAmount = 49_500;
+
+  assert.equal(calculateAvailableBalance(lifetimeCollections, customerAmount), 500);
+});
+
+test("available balance rejects invalid aggregate values", () => {
+  assert.throws(() => calculateAvailableBalance(Number.NaN, 0));
+  assert.throws(() => calculateAvailableBalance(1_000, Number.POSITIVE_INFINITY));
 });
 
 test("Quick Pay refreshes every screen where a payment must be reflected", () => {
