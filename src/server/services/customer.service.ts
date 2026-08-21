@@ -16,7 +16,6 @@ import { prisma } from "@/lib/prisma";
 import { hashPassword } from "@/lib/password";
 import { normalizePhone } from "@/lib/phone";
 import { generateCustomerCode } from "@/lib/customer-code";
-import { savePassportPhoto, deletePassportPhoto, PhotoUploadError } from "@/lib/file-upload";
 import {
   registerCustomerSchema,
   reassignAgentSchema,
@@ -134,9 +133,7 @@ export async function registerCustomer(
 
 /**
  * Update a customer's editable profile fields (name, phone, ID number).
- * Does NOT touch assignedAgentId (see editCustomerSchema comment) or
- * passportPhotoUrl (handled separately by uploadCustomerPassportPhoto,
- * since that's a file-upload concern, not a form-field concern).
+ * Does NOT touch assignedAgentId (see editCustomerSchema comment).
  */
 export async function updateCustomer(
   input: EditCustomerInput
@@ -194,57 +191,6 @@ export async function updateCustomer(
   });
 
   return ok({ customerProfileId });
-}
-
-/**
- * Upload (or replace) a customer's passport photo.
- * If the customer already had a photo, the old file is deleted after the
- * new one is successfully saved and the database row is updated — so a
- * failed upload never leaves the customer with no photo at all.
- */
-export async function uploadCustomerPassportPhoto(
-  customerProfileId: string,
-  file: File
-): Promise<ActionResult<{ passportPhotoUrl: string }>> {
-  const existing = await prisma.customerProfile.findUnique({
-    where: { id: customerProfileId },
-    select: { id: true, passportPhotoUrl: true },
-  });
-  if (!existing) {
-    return fail("Customer not found.");
-  }
-
-  let newPhotoUrl: string;
-  try {
-    newPhotoUrl = await savePassportPhoto(customerProfileId, file);
-  } catch (error) {
-    if (error instanceof PhotoUploadError) {
-      return fail(error.message);
-    }
-    throw error;
-  }
-
-  try {
-    await prisma.customerProfile.update({
-      where: { id: customerProfileId },
-      data: { passportPhotoUrl: newPhotoUrl },
-    });
-  } catch (error) {
-    // Do not leave a private object orphaned when the database write fails.
-    await deletePassportPhoto(customerProfileId, newPhotoUrl).catch((cleanupError) => {
-      console.error("Failed to remove an unreferenced passport photo.", cleanupError);
-    });
-    throw error;
-  }
-
-  // Clean up the old file only after the new one is safely stored+saved.
-  await deletePassportPhoto(customerProfileId, existing.passportPhotoUrl).catch((error) => {
-    // The new photo is already committed. A cleanup failure must not make the
-    // successful replacement look unsuccessful to the user.
-    console.error("Failed to remove the replaced passport photo.", error);
-  });
-
-  return ok({ passportPhotoUrl: newPhotoUrl });
 }
 
 /**
@@ -426,10 +372,6 @@ export async function deleteCustomer(
   // removes their login account, which is the whole point of "delete this
   // registration" rather than just "unlink this profile".
   await prisma.user.delete({ where: { id: existing.userId } });
-
-  await deletePassportPhoto(customerProfileId, existing.passportPhotoUrl).catch((error) => {
-    console.error("Failed to remove a deleted customer's passport photo.", error);
-  });
 
   return ok({ customerProfileId });
 }

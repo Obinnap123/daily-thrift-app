@@ -141,7 +141,6 @@ export async function findCustomerProfileWithUserId(customerProfileId: string) {
       userId: true,
       idNumber: true,
       assignedAgentId: true,
-      passportPhotoUrl: true,
       user: { select: { phone: true } },
     },
   });

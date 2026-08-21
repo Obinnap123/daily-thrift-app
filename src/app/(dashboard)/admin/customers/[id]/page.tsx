@@ -1,9 +1,7 @@
 /**
  * Admin > Customer detail page.
- * Shows the customer's profile (incl. customer code + passport photo), an
- * Edit form, the passport-photo upload/replace control, their full
- * agent-assignment history (audit trail), and a form to rotate them to a
- * different agent.
+ * Shows the customer's profile, editable details, full agent-assignment
+ * history (audit trail), and a form to rotate them to a different agent.
  */
 import { notFound } from "next/navigation";
 import { requireRole } from "@/lib/session";
@@ -15,7 +13,6 @@ import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { ReassignAgentForm } from "@/components/forms/ReassignAgentForm";
 import { EditCustomerForm } from "@/components/forms/EditCustomerForm";
-import { PassportPhotoUpload } from "@/components/forms/PassportPhotoUpload";
 import { DeleteCustomerButton } from "@/components/forms/DeleteCustomerButton";
 import { CustomerTrackingPanel } from "@/components/dashboard/CustomerTrackingPanel";
 import { getActivePlanWithProgress } from "@/server/services/contribution-plan.service";
@@ -106,17 +103,6 @@ export default async function AdminCustomerDetailPage({
                 phone: customer.user.phone,
                 idNumber: customer.idNumber,
               }}
-            />
-          </Card>
-
-          {/* Passport photo */}
-          <Card className="lg:col-span-1">
-            <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-500">
-              Passport Photo
-            </h3>
-            <PassportPhotoUpload
-              customerProfileId={customer.id}
-              hasCurrentPhoto={Boolean(customer.passportPhotoUrl)}
             />
           </Card>
 
