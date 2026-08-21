@@ -23,6 +23,12 @@ import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { format } from "date-fns";
 import { MonthlyTrackingSheets } from "@/components/dashboard/MonthlyTrackingSheets";
+import { getBusinessSettings } from "@/server/services/settings.service";
+import { listMissingPaymentReportsForCustomer } from "@/server/repositories/missing-payment-report.repository";
+import { MissingPaymentReportButton } from "@/components/forms/MissingPaymentReportButton";
+import { dateKey, today } from "@/lib/date";
+
+const REPORT_STATUS_TONE = { OPEN: "amber", RESOLVED: "green", DISMISSED: "gray" } as const;
 
 export default async function CustomerDashboardPage() {
   const user = await requireRole("CUSTOMER");
@@ -35,10 +41,14 @@ export default async function CustomerDashboardPage() {
     notFound();
   }
 
-  const [planWithProgress, payoutHistory] = await Promise.all([
+  const [planWithProgress, payoutHistory, settings, paymentReports] = await Promise.all([
     getActivePlanWithProgress(profile.id),
     listPayoutsForCustomer(profile.id),
+    getBusinessSettings(),
+    listMissingPaymentReportsForCustomer(profile.id),
   ]);
+  const supportPhone = settings.supportPhone?.trim() || null;
+  const whatsappNumber = supportPhone ? toWhatsAppNumber(supportPhone) : null;
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -153,6 +163,58 @@ export default async function CustomerDashboardPage() {
           <MonthlyTrackingSheets customerProfileId={profile.id} />
         </section>
 
+        <Card>
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-2xl">
+              <h2 className="text-lg font-semibold text-ink">Payment Help</h2>
+              <p className="mt-1 text-sm leading-relaxed text-ink-muted">
+                If money you paid is not showing in your history or tracking sheet, report it for
+                an admin to investigate. Reports never add money automatically.
+              </p>
+              {(supportPhone || settings.supportEmail) && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {supportPhone && (
+                    <a href={`tel:${supportPhone}`} className="inline-flex min-h-11 items-center rounded-xl border border-line-strong bg-surface px-3 text-sm font-medium text-ink hover:bg-surface-hover">
+                      Call {supportPhone}
+                    </a>
+                  )}
+                  {whatsappNumber && (
+                    <a href={`https://wa.me/${whatsappNumber}`} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center rounded-xl border border-line-strong bg-surface px-3 text-sm font-medium text-brand-ink hover:bg-surface-hover">
+                      WhatsApp Support
+                    </a>
+                  )}
+                  {settings.supportEmail && (
+                    <a href={`mailto:${settings.supportEmail}`} className="inline-flex min-h-11 items-center rounded-xl border border-line-strong bg-surface px-3 text-sm font-medium text-ink hover:bg-surface-hover">
+                      Email Support
+                    </a>
+                  )}
+                </div>
+              )}
+            </div>
+            <MissingPaymentReportButton businessDate={dateKey(today())} />
+          </div>
+
+          {paymentReports.length > 0 && (
+            <div className="mt-6 border-t border-line pt-5">
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-ink-muted">My Recent Reports</h3>
+              <ul className="mt-3 divide-y divide-line">
+                {paymentReports.map((report) => (
+                  <li key={report.id} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <p className="font-medium text-ink">
+                        ₦{Number(report.reportedAmount).toLocaleString()} paid {format(report.paymentDate, "dd MMM yyyy")}
+                      </p>
+                      <p className="text-xs text-ink-muted">Reported {format(report.createdAt, "dd MMM yyyy, h:mm a")}</p>
+                      {report.reviewNote && <p className="mt-1 text-sm text-ink-muted">{report.reviewNote}</p>}
+                    </div>
+                    <Badge tone={REPORT_STATUS_TONE[report.status]}>{report.status}</Badge>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </Card>
+
         {/* Payout history */}
         {payoutHistory.length > 0 && (
           <Card>
@@ -180,6 +242,12 @@ export default async function CustomerDashboardPage() {
       </main>
     </div>
   );
+}
+
+function toWhatsAppNumber(phone: string): string | null {
+  const digits = phone.replace(/\D/g, "");
+  if (!digits) return null;
+  return digits.startsWith("0") ? `234${digits.slice(1)}` : digits;
 }
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {

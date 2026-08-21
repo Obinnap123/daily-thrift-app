@@ -84,6 +84,12 @@ enum AuditOutcome {
   FAILURE
 }
 
+enum MissingPaymentReportStatus {
+  OPEN
+  RESOLVED
+  DISMISSED
+}
+
 // ----------------------------------------------------------------------------
 // Models
 // ----------------------------------------------------------------------------
@@ -162,6 +168,7 @@ model User {
 
   notifications Notification[]
   auditLogs     AuditLog[]
+  missingPaymentReportsReviewed MissingPaymentReport[] @relation("MissingPaymentReportReviewedBy")
 
   @@index([role])
   @@map("users")
@@ -238,6 +245,7 @@ model CustomerProfile {
   /// completed cycles) — shown in their profile's payout history.
   payouts       Payout[]
   contributions Contribution[]
+  missingPaymentReports MissingPaymentReport[]
 
   @@index([assignedAgentId])
   @@map("customer_profiles")
@@ -323,6 +331,7 @@ model ContributionPlan {
   /// specific cycle.
   contributions Contribution[]
   allocations   ContributionAllocation[]
+  missingPaymentReports MissingPaymentReport[]
 
   /// The payout for this cycle, once one has been recorded. A plan can have
   /// at most one payout — enforced by @unique on Payout.contributionPlanId.
@@ -607,4 +616,36 @@ model AuditLog {
   @@index([actorId, createdAt])
   @@index([action, outcome])
   @@map("audit_logs")
+}
+
+/// A customer-raised concern that money they handed over is not reflected in
+/// their savings history. Reviewing this case never edits financial records;
+/// any correction must still use the normal audited contribution workflow.
+model MissingPaymentReport {
+  id String @id @default(cuid())
+
+  customerProfileId String
+  customerProfile   CustomerProfile @relation(fields: [customerProfileId], references: [id], onDelete: Cascade)
+
+  /// The active period at submission time, when one exists. Reports are also
+  /// allowed immediately after payout, before the first new payment has
+  /// created the next period, so this relation is intentionally optional.
+  contributionPlanId String?
+  contributionPlan   ContributionPlan? @relation(fields: [contributionPlanId], references: [id], onDelete: SetNull)
+
+  paymentDate    DateTime @db.Date
+  reportedAmount Decimal  @db.Decimal(12, 2)
+  customerNote   String?
+  status         MissingPaymentReportStatus @default(OPEN)
+
+  reviewedById String?
+  reviewedBy   User? @relation("MissingPaymentReportReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewNote   String?
+  reviewedAt   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([customerProfileId, createdAt])
+  @@map("missing_payment_reports")
 }

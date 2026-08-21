@@ -13,6 +13,10 @@ import {
   resolveCollectionDayState,
 } from "../src/lib/collection-day-state";
 import { buildTrackingSheets } from "../src/lib/tracking";
+import {
+  reviewMissingPaymentReportSchema,
+  submitMissingPaymentReportSchema,
+} from "../src/validations/missing-payment-report";
 
 test("Quick Pay accepts a native date-input value and converts it to a Date", () => {
   const result = quickPaySchema.parse({
@@ -121,6 +125,31 @@ test("tracking marks past unfunded dates missed and invalid month dates unavaila
   assert.equal(sheets[0].cells[1].state, "missed");
   assert.equal(sheets[0].cells[2].state, "pending");
   assert.equal(sheets[0].cells[30].state, "invalid");
+});
+
+test("missing-payment reports require a positive amount and valid payment date", () => {
+  assert.equal(submitMissingPaymentReportSchema.safeParse({
+    paymentDate: "2026-08-21",
+    reportedAmount: 3000,
+    customerNote: "Cash paid to my agent",
+  }).success, true);
+  assert.equal(submitMissingPaymentReportSchema.safeParse({
+    paymentDate: "not-a-date",
+    reportedAmount: 0,
+  }).success, false);
+});
+
+test("closing a missing-payment report requires an admin review note", () => {
+  assert.equal(reviewMissingPaymentReportSchema.safeParse({
+    reportId: "report-1",
+    decision: "RESOLVED",
+    reviewNote: "Verified and corrected through Quick Pay.",
+  }).success, true);
+  assert.equal(reviewMissingPaymentReportSchema.safeParse({
+    reportId: "report-1",
+    decision: "DISMISSED",
+    reviewNote: "",
+  }).success, false);
 });
 
 test("partial money is retained as credit and completes the next slot", () => {
