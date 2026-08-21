@@ -23,6 +23,7 @@ import {
 import { findActivePlanForCustomer } from "@/server/repositories/contribution-plan.repository";
 import { ok, fail, type ActionResult } from "@/lib/action-result";
 import { isActivePlanUniqueConflict } from "@/lib/prisma-errors";
+import { countUnfundedPastDays } from "@/lib/collection-day-state";
 
 /** Computed savings-progress snapshot for a single ContributionPlan. */
 export interface PlanProgress {
@@ -142,5 +143,12 @@ export async function getActivePlanWithProgress(customerProfileId: string) {
   });
   if (!plan) return null;
 
-  return { plan, progress: computePlanProgress(plan, plan.contributions), asOf: today() };
+  const asOf = today();
+  const progress = computePlanProgress(plan, plan.contributions);
+  progress.daysMissed = countUnfundedPastDays(
+    plan.nextCoverageDate ?? plan.startDate,
+    asOf,
+  );
+
+  return { plan, progress, asOf };
 }

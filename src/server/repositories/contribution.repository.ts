@@ -12,6 +12,7 @@
 import { prisma } from "@/lib/prisma";
 import { toDateOnly, today, addDaysToDate, dateKey, weekRange, monthRange } from "@/lib/date";
 import { format } from "date-fns";
+import { countUnfundedPastDays } from "@/lib/collection-day-state";
 
 /**
  * The NORMAL (non-override) Contribution row for a given plan + day, if one
@@ -147,31 +148,22 @@ export async function listCustomerIdsNotVisited(agentId: string, date: Date) {
 }
 
 /**
- * Sum of the outstanding (unresolved missed-day) amount owed across an
- * agent's ACTIVE plans — "Outstanding collections" on the Agent Collection
- * Summary. Defined as: for each active plan, (number of MISSED days so far)
- * × dailyAmount, summed across all the agent's active plans. A missed day
- * remains "outstanding" until the customer eventually pays extra days to
- * make up the shortfall (paid-day-based maturity — see
- * contribution-plan.service.ts).
+ * Sum genuinely unfunded past calendar days across an agent's active plans.
+ * Deriving this from nextCoverageDate means advance payments immediately
+ * clear the dates they fund instead of leaving stale MISSED rows in totals.
  */
-export async function sumOutstandingForAgent(agentId: string): Promise<number> {
+export async function sumOutstandingForAgent(
+  agentId: string,
+  asOf: Date = today(),
+): Promise<number> {
   const activePlans = await prisma.contributionPlan.findMany({
     where: { status: "ACTIVE", customerProfile: { assignedAgentId: agentId } },
-    select: { id: true, dailyAmount: true },
+    select: { dailyAmount: true, startDate: true, nextCoverageDate: true },
   });
-  if (activePlans.length === 0) return 0;
-
-  const missedCounts = await prisma.contribution.groupBy({
-    by: ["contributionPlanId"],
-    where: { contributionPlanId: { in: activePlans.map((p) => p.id) }, status: "MISSED" },
-    _count: { _all: true },
-  });
-  const missedByPlan = new Map(missedCounts.map((row) => [row.contributionPlanId, row._count._all]));
 
   return activePlans.reduce((total, plan) => {
-    const missedDays = missedByPlan.get(plan.id) ?? 0;
-    return total + missedDays * Number(plan.dailyAmount);
+    const nextCoverageDate = plan.nextCoverageDate ?? plan.startDate;
+    return total + countUnfundedPastDays(nextCoverageDate, asOf) * Number(plan.dailyAmount);
   }, 0);
 }
 

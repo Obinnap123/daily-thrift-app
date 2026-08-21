@@ -16,7 +16,8 @@ export async function getTrackingData(customerProfileId: string) {
     sheets: buildTrackingSheets(
       plan.startDate,
       plan.allocations.map((a) => a.coverageDate),
-      plan.status === "PAID_OUT"
+      plan.status === "PAID_OUT",
+      { endedAt: plan.payout?.lastCoveredDate ?? plan.endedAt },
     ),
   }));
 }

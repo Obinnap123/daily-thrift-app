@@ -25,7 +25,7 @@ export function AllCustomerTrackingTable({ rows, role }: { rows: CurrentTracking
               <td className="whitespace-nowrap px-3 py-3">₦{row.dailyAmount.toLocaleString()}</td>
               <td className="whitespace-nowrap px-3 py-3">{row.sheet.paid}/{row.sheet.eligible}<span className="block text-xs text-ink-subtle">{row.sheetCount} sheet{row.sheetCount === 1 ? "" : "s"}</span></td>
               <td className="whitespace-nowrap px-3 py-3">₦{row.credit.toLocaleString()}</td>
-              {row.sheet.cells.map((cell) => <td key={cell.day} className="px-1 py-2"><span title={cell.state} aria-label={`Day ${cell.day}: ${cell.state}`} className={`flex h-7 w-7 items-center justify-center rounded-md text-xs ${cell.state === "paid" ? "bg-emerald-600 text-white" : cell.state === "pending" ? "bg-surface-hover text-ink-muted" : "bg-surface-muted text-ink-subtle"}`}>{cell.state === "paid" ? "✓" : "–"}</span></td>)}
+              {row.sheet.cells.map((cell) => <td key={cell.day} className="px-1 py-2"><span title={cell.state} aria-label={`Day ${cell.day}: ${cell.state}`} className={`flex h-7 w-7 items-center justify-center rounded-md text-xs ${cell.state === "paid" ? "bg-emerald-600 text-white" : cell.state === "missed" ? "bg-danger-soft text-danger" : cell.state === "pending" ? "bg-surface-hover text-ink-muted" : "bg-surface-muted text-ink-subtle"}`}>{cell.state === "paid" ? "✓" : cell.state === "missed" ? "!" : "–"}</span></td>)}
             </tr>
           ))}
         </tbody>

@@ -18,12 +18,10 @@ export async function findActivePlanForCustomer(customerProfileId: string) {
 }
 
 /**
- * Every ACTIVE plan belonging to one agent's customers, together with
- * (only) that plan's Contribution row for `date` if one exists — the data
- * source for the Agent's "Today's Collections" list: one row per customer
- * with an active plan, pre-loaded with whether today has already been
- * recorded so the page can render "Save" vs. "Already recorded" per row
- * without an extra query per customer.
+ * Every ACTIVE plan belonging to one agent's customers, together with that
+ * plan's normal Contribution row and funded allocation for `date`.
+ * Allocation coverage is deliberately loaded separately from transaction
+ * activity because one earlier payment may cover several later days.
  */
 export async function listActivePlansForAgent(agentId: string, date: Date) {
   return prisma.contributionPlan.findMany({
@@ -32,7 +30,17 @@ export async function listActivePlansForAgent(agentId: string, date: Date) {
       customerProfile: {
         include: { user: { select: { id: true, name: true, phone: true, isActive: true } } },
       },
-      contributions: { where: { collectionDate: toDateOnly(date) } },
+      contributions: {
+        where: { collectionDate: toDateOnly(date), isOverride: false },
+        orderBy: { createdAt: "desc" },
+      },
+      allocations: {
+        where: { coverageDate: toDateOnly(date) },
+        select: {
+          id: true,
+          contribution: { select: { collectionDate: true } },
+        },
+      },
     },
     orderBy: { createdAt: "asc" },
   });

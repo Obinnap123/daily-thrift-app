@@ -23,6 +23,11 @@ export async function listCustomerProfiles(options?: { agentId?: string }) {
     include: {
       user: { select: { id: true, name: true, phone: true, isActive: true, createdAt: true } },
       assignedAgent: { select: { id: true, name: true, email: true } },
+      contributionPlans: {
+        orderBy: { createdAt: "desc" },
+        take: 1,
+        select: { id: true, status: true },
+      },
     },
     orderBy: { createdAt: "desc" },
   });

@@ -6,7 +6,7 @@
  * component owns both the button and the modal's open/closed state so
  * every page that wants Quick Pay only needs to drop in one component.
  */
-import { useState } from "react";
+import { useState, type ComponentProps } from "react";
 import { Button } from "@/components/ui/Button";
 import { QuickPayModal } from "@/components/forms/QuickPayModal";
 import type { CustomerSearchOption } from "@/components/forms/CustomerSearchSelect";
@@ -17,6 +17,8 @@ interface QuickPayButtonProps {
   initialCustomerProfileId?: string;
   /** Override the button label (e.g. "Quick Record Payment" on the Customer Tracking page). */
   label?: string;
+  variant?: ComponentProps<typeof Button>["variant"];
+  size?: ComponentProps<typeof Button>["size"];
   /** Called with the new receipt number right after a successful payment.
    * The modal itself already shows an in-modal success screen with a
    * "View/Print Receipt" link — this is only for extra parent-level
@@ -29,13 +31,21 @@ export function QuickPayButton({
   isAdmin,
   initialCustomerProfileId,
   label = "Quick Pay",
+  variant = "primary",
+  size = "md",
   onSuccess,
 }: QuickPayButtonProps) {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
     <>
-      <Button type="button" onClick={() => setIsOpen(true)} className="gap-2">
+      <Button
+        type="button"
+        variant={variant}
+        size={size}
+        onClick={() => setIsOpen(true)}
+        className="gap-2"
+      >
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
           <path
             fillRule="evenodd"

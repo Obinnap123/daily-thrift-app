@@ -161,6 +161,30 @@ export async function recordContribution(
         plan = await createNextActivePlan(tx, customerProfileId, previous, collectionDate);
       }
 
+      if (status === "MISSED") {
+        if (collectionDate < toDateOnly(plan.startDate)) {
+          return {
+            success: false as const,
+            error: "This savings period has not started yet, so today cannot be marked as missed.",
+          };
+        }
+        const fundedToday = await tx.contributionAllocation.findUnique({
+          where: {
+            contributionPlanId_coverageDate: {
+              contributionPlanId: plan.id,
+              coverageDate: collectionDate,
+            },
+          },
+          select: { id: true },
+        });
+        if (fundedToday) {
+          return {
+            success: false as const,
+            error: "Today is already covered by this customer's savings. It cannot be marked as missed.",
+          };
+        }
+      }
+
       const alreadyRecorded = await tx.contribution.findFirst({
         where: { contributionPlanId: plan.id, collectionDate, isOverride: false },
         select: { id: true },

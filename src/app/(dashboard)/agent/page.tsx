@@ -16,6 +16,7 @@ import {
   getDashboardContributionSummary,
 } from "@/server/repositories/contribution.repository";
 import { today } from "@/lib/date";
+import { resolveCollectionDayState } from "@/lib/collection-day-state";
 import { getPaidOutByAgentToday } from "@/server/repositories/financial.repository";
 import { DashboardHeader } from "@/components/layout/DashboardHeader";
 import { DashboardNav } from "@/components/layout/DashboardNav";
@@ -36,6 +37,7 @@ const AGENT_NAV_LINKS = [
 
 export default async function AgentDashboardPage() {
   const user = await requireRole("AGENT");
+  const businessDate = today();
 
   const [
     myCustomers,
@@ -46,8 +48,8 @@ export default async function AgentDashboardPage() {
   ] = await Promise.all([
     listCustomerProfiles({ agentId: user.id }),
     getDashboardContributionSummary(user.id),
-    sumOutstandingForAgent(user.id),
-    listActivePlansForAgent(user.id, today()),
+    sumOutstandingForAgent(user.id, businessDate),
+    listActivePlansForAgent(user.id, businessDate),
     getPaidOutByAgentToday(user.id),
   ]);
 
@@ -61,7 +63,15 @@ export default async function AgentDashboardPage() {
   // /agent/collections, just surfaced directly on the dashboard so an
   // agent doesn't have to navigate away to record the common case in one
   // click.
-  const notYetRecordedToday = activePlansToday.filter((plan) => !plan.contributions[0]);
+  const dueToday = activePlansToday.filter((plan) =>
+    resolveCollectionDayState({
+      businessDate,
+      planStartDate: plan.startDate,
+      hasCoverageAllocation: Boolean(plan.allocations[0]),
+      coveragePaymentDate: plan.allocations[0]?.contribution?.collectionDate,
+      contributionStatus: plan.contributions[0]?.status,
+    }) === "DUE"
+  );
 
   // Quick Pay (modal): the searchable customer dropdown covers EVERY one
   // of this agent's customers, not just those not-yet-recorded-today — the
@@ -85,7 +95,7 @@ export default async function AgentDashboardPage() {
           <div>
             <h2 className="text-lg font-semibold text-gray-900">Daily Collection Summary</h2>
             <p className="text-sm text-gray-500">
-              Your collection activity and totals for {today().toLocaleDateString()}.
+              Your collection activity and totals for {businessDate.toLocaleDateString()}.
             </p>
           </div>
           <QuickPayButton customers={quickPayCustomers} isAdmin={false} label="Quick Pay" />
@@ -113,7 +123,7 @@ export default async function AgentDashboardPage() {
         <Card>
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
-              Quick Pay — Not Yet Recorded Today ({notYetRecordedToday.length})
+              Needs Attention Today ({dueToday.length})
             </h3>
             <Link
               href="/agent/collections"
@@ -123,16 +133,15 @@ export default async function AgentDashboardPage() {
             </Link>
           </div>
           <p className="mb-3 text-sm text-gray-500">
-            Record today&apos;s outcome for a customer in one click, right from here — no need to
-            open Today&apos;s Collections first.
+            Only customers whose current calendar day is not yet funded appear here.
           </p>
-          {notYetRecordedToday.length === 0 ? (
+          {dueToday.length === 0 ? (
             <p className="text-sm text-gray-500">
-              Every customer with an active plan has been recorded for today. Great work!
+              Every active customer&apos;s current day is covered or already recorded.
             </p>
           ) : (
             <ul className="divide-y divide-gray-100">
-              {notYetRecordedToday.map((plan) => (
+              {dueToday.map((plan) => (
                 <li
                   key={plan.id}
                   className="flex flex-wrap items-center justify-between gap-3 py-2.5 text-sm"

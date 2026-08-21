@@ -8,6 +8,11 @@ import {
   lockReconciliationState,
 } from "../src/lib/financial-transaction";
 import { calculateAvailableBalance } from "../src/lib/financial-metrics";
+import {
+  countUnfundedPastDays,
+  resolveCollectionDayState,
+} from "../src/lib/collection-day-state";
+import { buildTrackingSheets } from "../src/lib/tracking";
 
 test("Quick Pay accepts a native date-input value and converts it to a Date", () => {
   const result = quickPaySchema.parse({
@@ -40,6 +45,82 @@ test("a ₦2,000 payment at ₦500 per day funds four slots", () => {
     fullSlots: 4,
     creditBalance: 0,
   });
+});
+
+test("a ₦3,000 payment at ₦500 per day covers six consecutive calendar cells", () => {
+  const allocation = calculateContributionAllocation(500, 0, 3000);
+  assert.equal(allocation.fullSlots, 6);
+
+  const paidDates = Array.from({ length: allocation.fullSlots }, (_, index) =>
+    new Date(Date.UTC(2026, 7, 20 + index)),
+  );
+  const [august] = buildTrackingSheets(
+    new Date("2026-08-20T00:00:00.000Z"),
+    paidDates,
+    false,
+    { asOf: new Date("2026-08-21T00:00:00.000Z") },
+  );
+
+  assert.deepEqual(
+    august.cells.slice(19, 25).map((cell) => cell.state),
+    ["paid", "paid", "paid", "paid", "paid", "paid"],
+  );
+});
+
+test("an earlier payment allocation makes today covered in advance", () => {
+  assert.equal(
+    resolveCollectionDayState({
+      businessDate: new Date("2026-08-21T00:00:00.000Z"),
+      planStartDate: new Date("2026-08-20T00:00:00.000Z"),
+      hasCoverageAllocation: true,
+      coveragePaymentDate: new Date("2026-08-20T00:00:00.000Z"),
+      contributionStatus: null,
+    }),
+    "COVERED_IN_ADVANCE",
+  );
+});
+
+test("a future savings-period start is not treated as due or missed", () => {
+  assert.equal(
+    resolveCollectionDayState({
+      businessDate: new Date("2026-08-21T00:00:00.000Z"),
+      planStartDate: new Date("2026-08-24T00:00:00.000Z"),
+      hasCoverageAllocation: false,
+      contributionStatus: null,
+    }),
+    "NOT_STARTED",
+  );
+});
+
+test("only unfunded dates before today count as outstanding", () => {
+  assert.equal(
+    countUnfundedPastDays(
+      new Date("2026-08-19T00:00:00.000Z"),
+      new Date("2026-08-21T00:00:00.000Z"),
+    ),
+    2,
+  );
+  assert.equal(
+    countUnfundedPastDays(
+      new Date("2026-08-24T00:00:00.000Z"),
+      new Date("2026-08-21T00:00:00.000Z"),
+    ),
+    0,
+  );
+});
+
+test("tracking marks past unfunded dates missed and invalid month dates unavailable", () => {
+  const sheets = buildTrackingSheets(
+    new Date("2026-09-01T00:00:00.000Z"),
+    [new Date("2026-09-01T00:00:00.000Z")],
+    false,
+    { asOf: new Date("2026-09-03T00:00:00.000Z") },
+  );
+
+  assert.equal(sheets[0].cells[0].state, "paid");
+  assert.equal(sheets[0].cells[1].state, "missed");
+  assert.equal(sheets[0].cells[2].state, "pending");
+  assert.equal(sheets[0].cells[30].state, "invalid");
 });
 
 test("partial money is retained as credit and completes the next slot", () => {

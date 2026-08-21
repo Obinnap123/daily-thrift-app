@@ -140,10 +140,13 @@ export async function getCustomerPlanForQuickPayAction(customerProfileId: string
       where: { customerProfileId },
       orderBy: { createdAt: "desc" },
     });
-    if (!previous) return ok({ plan: null, alreadyPaidToday: false });
+    if (!previous) {
+      return ok({ plan: null, alreadyPaidToday: false, startsNewPeriod: false });
+    }
     return ok({
       plan: { id: previous.id, dailyAmount: Number(previous.dailyAmount), durationDays: 31 },
       alreadyPaidToday: false,
+      startsNewPeriod: true,
     });
   }
 
@@ -152,6 +155,7 @@ export async function getCustomerPlanForQuickPayAction(customerProfileId: string
   return ok({
     plan: { id: plan.id, dailyAmount: Number(plan.dailyAmount), durationDays: plan.durationDays },
     alreadyPaidToday: !!existing,
+    startsNewPeriod: false,
   });
 }
 

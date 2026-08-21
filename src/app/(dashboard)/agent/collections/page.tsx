@@ -1,29 +1,26 @@
 /**
  * Agent > Today's Collections.
- * ----------------------------------------------------------------------------
- * One row per customer who has an ACTIVE savings plan, each with an inline
- * RecordContributionForm so the agent can log COLLECTED/MISSED for today in
- * a single click per customer. A row that already has today's Contribution
- * recorded shows a read-only "already recorded" summary instead of the form
- * — this is what actually enforces (at the UI level; the real enforcement
- * is the @@unique([contributionPlanId, collectionDate]) DB constraint and
- * the duplicate check in recordContribution()) that a customer can't be
- * visited twice in the same day.
  *
- * Customers with NO active plan yet are also listed, but only with a note
- * pointing the agent to the customer's profile page to start one — you
- * cannot record a contribution against a plan that doesn't exist.
+ * A payment transaction and a funded calendar day are intentionally
+ * separate concepts. One payment can fund several future calendar days,
+ * so this screen resolves today's state from ContributionAllocation first
+ * and uses today's Contribution row only as secondary activity context.
  */
+import Link from "next/link";
 import { requireRole } from "@/lib/session";
 import { listCustomerProfiles } from "@/server/repositories/customer.repository";
 import { listActivePlansForAgent } from "@/server/repositories/contribution-plan.repository";
 import { today } from "@/lib/date";
+import {
+  resolveCollectionDayState,
+  type CollectionDayState,
+} from "@/lib/collection-day-state";
 import { DashboardHeader } from "@/components/layout/DashboardHeader";
 import { DashboardNav } from "@/components/layout/DashboardNav";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { RecordContributionForm } from "@/components/forms/RecordContributionForm";
-import Link from "next/link";
+import { QuickPayButton } from "@/components/forms/QuickPayButton";
 
 const AGENT_NAV_LINKS = [
   { href: "/agent", label: "Overview" },
@@ -31,19 +28,93 @@ const AGENT_NAV_LINKS = [
   { href: "/agent/reconciliation", label: "End-of-Day Report" },
 ];
 
+type AgentPlan = Awaited<ReturnType<typeof listActivePlansForAgent>>[number];
+
+function getTodayState(plan: AgentPlan, businessDate: Date): CollectionDayState {
+  return resolveCollectionDayState({
+    businessDate,
+    planStartDate: plan.startDate,
+    hasCoverageAllocation: Boolean(plan.allocations[0]),
+    coveragePaymentDate: plan.allocations[0]?.contribution?.collectionDate,
+    contributionStatus: plan.contributions[0]?.status,
+  });
+}
+
+function TodayOutcome({ plan, businessDate }: { plan: AgentPlan; businessDate: Date }) {
+  const state = getTodayState(plan, businessDate);
+  const todayContribution = plan.contributions[0];
+
+  if (state === "NOT_STARTED") {
+    return (
+      <div className="space-y-1">
+        <Badge>Not started</Badge>
+        <p className="text-xs text-ink-muted">
+          Starts {plan.startDate.toLocaleDateString("en-GB", { timeZone: "UTC" })}
+        </p>
+      </div>
+    );
+  }
+
+  if (state === "COVERED_TODAY" || state === "COVERED_IN_ADVANCE") {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge tone="green">
+          {state === "COVERED_IN_ADVANCE" ? "Covered in advance" : "Covered today"}
+        </Badge>
+        {state === "COVERED_IN_ADVANCE" && !todayContribution && (
+          <QuickPayButton
+            customers={[{
+              id: plan.customerProfileId,
+              name: plan.customerProfile.user.name,
+              phone: plan.customerProfile.user.phone,
+              customerCode: plan.customerProfile.customerCode,
+            }]}
+            isAdmin={false}
+            initialCustomerProfileId={plan.customerProfileId}
+            label="Record More"
+            variant="secondary"
+            size="sm"
+          />
+        )}
+      </div>
+    );
+  }
+
+  if (state === "PAYMENT_RECORDED_UNCOVERED") {
+    return (
+      <div className="space-y-1">
+        <Badge tone="amber">Payment recorded</Badge>
+        <p className="max-w-xs text-xs text-ink-muted">
+          Today remains unfunded because this payment covered an older outstanding date.
+        </p>
+      </div>
+    );
+  }
+
+  if (state === "MISSED_RECORDED") {
+    return <Badge tone="red">Missed — recorded</Badge>;
+  }
+
+  return (
+    <RecordContributionForm
+      customerProfileId={plan.customerProfileId}
+      defaultAmount={Number(plan.dailyAmount)}
+    />
+  );
+}
+
 export default async function AgentCollectionsPage() {
   const user = await requireRole("AGENT");
+  const businessDate = today();
 
   const [plans, allCustomers] = await Promise.all([
-    listActivePlansForAgent(user.id, today()),
+    listActivePlansForAgent(user.id, businessDate),
     listCustomerProfiles({ agentId: user.id }),
   ]);
 
-  // Customers with no ACTIVE plan (new registrations, or a previous cycle
-  // already PAID_OUT) — can't record a contribution until a plan exists.
   const activePlanCustomerIds = new Set(plans.map((plan) => plan.customerProfileId));
   const customersWithoutActivePlan = allCustomers.filter(
-    (customer) => customer.user.isActive && !activePlanCustomerIds.has(customer.id)
+    (customer) => customer.user.isActive && !activePlanCustomerIds.has(customer.id),
   );
 
   return (
@@ -52,86 +123,123 @@ export default async function AgentCollectionsPage() {
       <DashboardNav links={AGENT_NAV_LINKS} />
       <main className="flex-1 space-y-6 p-4 sm:p-6">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900">Today&apos;s Collections</h2>
-          <p className="text-sm text-gray-500">
-            Record each customer&apos;s outcome for {today().toLocaleDateString()}. Once saved,
-            a day cannot be recorded twice.
+          <h2 className="text-lg font-semibold text-ink">Today&apos;s Collections</h2>
+          <p className="text-sm text-ink-muted">
+            Review each customer&apos;s coverage for {businessDate.toLocaleDateString("en-GB", { timeZone: "UTC" })}.
+            Prepaid days are shown as covered and cannot be marked missed.
           </p>
         </div>
 
-        <Card className="overflow-x-auto p-0">
+        <Card className="p-0">
           {plans.length === 0 ? (
-            <p className="p-6 text-center text-gray-500">
-              None of your customers have an active savings plan yet.
+            <p className="p-6 text-center text-ink-muted">
+              None of your customers have an active savings period yet.
             </p>
           ) : (
-            <table className="w-full text-left text-sm">
-              <thead className="border-b border-gray-200 bg-gray-50 text-gray-600">
-                <tr>
-                  <th className="px-4 py-3 font-medium">Customer</th>
-                  <th className="px-4 py-3 font-medium">Daily Amount</th>
-                  <th className="px-4 py-3 font-medium">Today&apos;s Outcome</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {plans.map((plan) => {
-                  const todaysContribution = plan.contributions[0];
-                  return (
-                    <tr key={plan.id}>
-                      <td className="px-4 py-3">
-                        <p className="font-medium text-gray-900">
-                          {plan.customerProfile.user.name}
+            <>
+              <div className="divide-y divide-line md:hidden">
+                {plans.map((plan) => (
+                  <article key={plan.id} className="space-y-4 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h3 className="font-semibold text-ink">{plan.customerProfile.user.name}</h3>
+                        <p className="text-sm text-ink-muted">
+                          {plan.customerProfile.user.phone ?? "No phone number"}
                         </p>
-                        <p className="text-xs text-gray-500">
-                          {plan.customerProfile.user.phone ?? "—"}
-                        </p>
-                      </td>
-                      <td className="px-4 py-3 text-gray-600">
-                        ₦{Number(plan.dailyAmount).toLocaleString()}
-                      </td>
-                      <td className="px-4 py-3">
-                        {todaysContribution ? (
-                          <Badge tone={todaysContribution.status === "COLLECTED" ? "green" : "red"}>
-                            {todaysContribution.status === "COLLECTED"
-                              ? `Collected — ₦${Number(todaysContribution.amount ?? 0).toLocaleString()}`
-                              : "Missed"}
-                          </Badge>
-                        ) : (
-                          <RecordContributionForm
-                            customerProfileId={plan.customerProfileId}
-                            defaultAmount={Number(plan.dailyAmount)}
-                          />
-                        )}
-                      </td>
+                      </div>
+                      <p className="shrink-0 font-semibold text-ink">
+                        ₦{Number(plan.dailyAmount).toLocaleString()}/day
+                      </p>
+                    </div>
+                    <TodayOutcome plan={plan} businessDate={businessDate} />
+                  </article>
+                ))}
+              </div>
+
+              <div className="hidden overflow-x-auto md:block">
+                <table className="w-full text-left text-sm">
+                  <thead className="border-b border-line bg-surface-muted text-ink-muted">
+                    <tr>
+                      <th className="px-4 py-3 font-medium">Customer</th>
+                      <th className="px-4 py-3 font-medium">Daily Amount</th>
+                      <th className="px-4 py-3 font-medium">Today&apos;s Coverage</th>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  </thead>
+                  <tbody className="divide-y divide-line">
+                    {plans.map((plan) => (
+                      <tr key={plan.id}>
+                        <td className="px-4 py-3">
+                          <p className="font-medium text-ink">{plan.customerProfile.user.name}</p>
+                          <p className="text-xs text-ink-muted">
+                            {plan.customerProfile.user.phone ?? "No phone number"}
+                          </p>
+                        </td>
+                        <td className="px-4 py-3 text-ink-muted">
+                          ₦{Number(plan.dailyAmount).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3">
+                          <TodayOutcome plan={plan} businessDate={businessDate} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </Card>
 
         {customersWithoutActivePlan.length > 0 && (
           <Card>
-            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">
-              No Active Savings Plan ({customersWithoutActivePlan.length})
+            <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-ink-muted">
+              No Active Savings Period ({customersWithoutActivePlan.length})
             </h3>
-            <p className="mb-3 text-sm text-gray-500">
-              These customers have no active savings cycle, so nothing can be recorded for them
-              yet. Visit each customer&apos;s profile (via Admin) to start a plan.
+            <p className="mb-4 text-sm text-ink-muted">
+              A customer who has completed a payout can begin again immediately—the first new
+              payment opens their next savings period automatically.
             </p>
-            <ul className="divide-y divide-gray-100">
-              {customersWithoutActivePlan.map((customer) => (
-                <li key={customer.id} className="flex items-center justify-between py-2 text-sm">
-                  <span className="font-medium text-gray-900">{customer.user.name}</span>
-                  <span className="text-gray-500">{customer.user.phone ?? "—"}</span>
-                </li>
-              ))}
+            <ul className="divide-y divide-line">
+              {customersWithoutActivePlan.map((customer) => {
+                const hasPreviousPeriod = Boolean(customer.contributionPlans[0]);
+                const customerOption = {
+                  id: customer.id,
+                  name: customer.user.name,
+                  phone: customer.user.phone,
+                  customerCode: customer.customerCode,
+                };
+                return (
+                  <li
+                    key={customer.id}
+                    className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div>
+                      <p className="font-medium text-ink">{customer.user.name}</p>
+                      <p className="text-sm text-ink-muted">{customer.user.phone ?? "No phone number"}</p>
+                    </div>
+                    {hasPreviousPeriod ? (
+                      <QuickPayButton
+                        customers={[customerOption]}
+                        isAdmin={false}
+                        initialCustomerProfileId={customer.id}
+                        label="Record First Payment"
+                        size="sm"
+                      />
+                    ) : (
+                      <Link
+                        href={`/agent/customers/${customer.id}`}
+                        className="inline-flex min-h-11 items-center justify-center rounded-xl border border-line-strong bg-surface px-3 py-1.5 text-sm font-medium text-ink hover:bg-surface-hover sm:min-h-0"
+                      >
+                        Start Savings Plan
+                      </Link>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           </Card>
         )}
 
-        <Link href="/agent" className="text-sm font-medium text-emerald-700 hover:underline">
+        <Link href="/agent" className="text-sm font-medium text-brand-ink hover:underline">
           &larr; Back to overview
         </Link>
       </main>

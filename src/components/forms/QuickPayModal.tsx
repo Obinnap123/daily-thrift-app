@@ -54,6 +54,7 @@ interface QuickPayModalProps {
 interface PlanInfo {
   dailyAmount: number;
   durationDays: number;
+  startsNewPeriod: boolean;
 }
 
 export function QuickPayModal({
@@ -138,6 +139,7 @@ export function QuickPayModal({
     setPlanInfo({
       dailyAmount: result.data.plan.dailyAmount,
       durationDays: result.data.plan.durationDays,
+      startsNewPeriod: result.data.startsNewPeriod,
     });
     setAlreadyPaidToday(result.data.alreadyPaidToday);
     setValue("amount", result.data.plan.dailyAmount);
@@ -244,7 +246,7 @@ export function QuickPayModal({
         )}
 
         {planInfo && (
-          <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm">
+          <div className="rounded-lg border border-line bg-surface-muted p-3 text-sm">
             <p className="text-gray-700">
               Daily contribution plan:{" "}
               <span className="font-medium text-gray-900">
@@ -252,6 +254,11 @@ export function QuickPayModal({
               </span>{" "}
               · {planInfo.durationDays}-day cycle
             </p>
+            {planInfo.startsNewPeriod && (
+              <p className="mt-2 rounded-md bg-brand-soft px-3 py-2 text-brand-ink">
+                This payment will automatically open the customer&apos;s next savings period.
+              </p>
+            )}
           </div>
         )}
 

@@ -3,7 +3,7 @@ import { dateKey, today, toDateOnly } from "@/lib/date";
 export interface TrackingCell {
   day: number;
   date: Date | null;
-  state: "paid" | "pending" | "outside" | "invalid";
+  state: "paid" | "pending" | "missed" | "outside" | "invalid";
 }
 
 export interface TrackingSheet {
@@ -15,7 +15,19 @@ export interface TrackingSheet {
   status: "CURRENT" | "COMPLETED_AWAITING_PAYOUT" | "PAID_OUT";
 }
 
-export function buildTrackingSheets(startDate: Date, paidDates: Date[], paidOut: boolean): TrackingSheet[] {
+interface TrackingSheetOptions {
+  /** Last date included in a closed payout period. */
+  endedAt?: Date | null;
+  /** Injectable business date for deterministic tests. */
+  asOf?: Date;
+}
+
+export function buildTrackingSheets(
+  startDate: Date,
+  paidDates: Date[],
+  paidOut: boolean,
+  options: TrackingSheetOptions = {},
+): TrackingSheet[] {
   const normalizedStart = toDateOnly(startDate);
   const normalizedPaidDates = paidDates.map(toDateOnly);
   const paidKeys = new Set(normalizedPaidDates.map(dateKey));
@@ -23,8 +35,9 @@ export function buildTrackingSheets(startDate: Date, paidDates: Date[], paidOut:
     (latest, date) => date > latest ? date : latest,
     normalizedStart
   );
-  const currentDate = today();
-  const end = lastPaid > currentDate ? lastPaid : currentDate;
+  const currentDate = toDateOnly(options.asOf ?? today());
+  const closedEnd = options.endedAt ? toDateOnly(options.endedAt) : lastPaid;
+  const end = paidOut ? closedEnd : lastPaid > currentDate ? lastPaid : currentDate;
   const sheets: TrackingSheet[] = [];
 
   for (
@@ -38,7 +51,9 @@ export function buildTrackingSheets(startDate: Date, paidDates: Date[], paidOut:
       if (day > daysInMonth) return { day, date: null, state: "invalid" };
       const date = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth(), day));
       if (date < normalizedStart) return { day, date, state: "outside" };
-      return { day, date, state: paidKeys.has(dateKey(date)) ? "paid" : "pending" };
+      if (paidOut && date > closedEnd) return { day, date, state: "outside" };
+      if (paidKeys.has(dateKey(date))) return { day, date, state: "paid" };
+      return { day, date, state: date < currentDate ? "missed" : "pending" };
     });
     const eligible = cells.filter((cell) => cell.state !== "invalid" && cell.state !== "outside").length;
     const paid = cells.filter((cell) => cell.state === "paid").length;

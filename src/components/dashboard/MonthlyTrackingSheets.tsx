@@ -16,7 +16,14 @@ export async function MonthlyTrackingSheets({ customerProfileId }: { customerPro
             </div>
             <Badge tone={plan.status === "PAID_OUT" ? "blue" : "green"}>{plan.status === "PAID_OUT" ? "PAID OUT" : "OPEN"}</Badge>
           </div>
-          <div className="space-y-5 p-4 sm:p-5">{sheets.map((sheet) => <Sheet key={sheet.key} sheet={sheet} />)}</div>
+          <div className="space-y-5 p-4 sm:p-5">
+            <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-ink-muted" aria-label="Tracking status legend">
+              <span><span className="font-semibold text-brand-ink">✓</span> Paid</span>
+              <span><span className="font-semibold text-danger">!</span> Unfunded past day</span>
+              <span><span className="font-semibold text-ink-muted">—</span> Pending or unavailable</span>
+            </div>
+            {sheets.map((sheet) => <Sheet key={sheet.key} sheet={sheet} />)}
+          </div>
         </Card>
       ))}
     </div>
@@ -33,8 +40,8 @@ function Sheet({ sheet }: { sheet: TrackingSheet }) {
       <div className="max-w-full overflow-x-auto pb-2" role="region" aria-label={`${sheet.label} daily cells`} tabIndex={0}>
         <div className="grid min-w-[992px] grid-cols-[repeat(31,minmax(28px,1fr))] gap-1">
           {sheet.cells.map((cell) => (
-            <div key={cell.day} title={cell.date ? `${cell.date.toLocaleDateString()} — ${cell.state}` : "Not a valid calendar date"} className={`flex h-8 items-center justify-center rounded-md text-xs font-medium ${cell.state === "paid" ? "bg-emerald-600 text-white" : cell.state === "pending" ? "bg-surface-hover text-ink-muted" : "bg-surface-muted text-ink-subtle"}`} aria-label={`Day ${cell.day}: ${cell.state}`}>
-              {cell.state === "paid" ? "✓" : cell.state === "pending" ? cell.day : "–"}
+            <div key={cell.day} title={cell.date ? `${cell.date.toLocaleDateString()} — ${cell.state}` : "Not a valid calendar date"} className={`flex h-8 items-center justify-center rounded-md text-xs font-medium ${cell.state === "paid" ? "bg-emerald-600 text-white" : cell.state === "missed" ? "bg-danger-soft text-danger" : cell.state === "pending" ? "bg-surface-hover text-ink-muted" : "bg-surface-muted text-ink-subtle"}`} aria-label={`Day ${cell.day}: ${cell.state}`}>
+              {cell.state === "paid" ? "✓" : cell.state === "pending" || cell.state === "missed" ? cell.day : "–"}
             </div>
           ))}
         </div>
