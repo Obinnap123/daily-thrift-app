@@ -56,3 +56,6 @@ logs/
 # User-uploaded content (customer passport photos) — not source code,
 # and in production this should be object storage (S3/R2), not local disk.
 /public/uploads/
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
