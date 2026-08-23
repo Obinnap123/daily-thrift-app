@@ -569,6 +569,7 @@ model BusinessSettings {
   id                       String   @id @default("default")
   businessName             String   @default("Davchuks Daily Thrift")
   supportPhone             String?
+  supportWhatsApp          String?
   supportEmail             String?
   businessAddress          String?
   receiptFooter            String?

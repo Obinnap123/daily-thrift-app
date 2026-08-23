@@ -17,6 +17,9 @@ export async function updateSettingsAction(input: SettingsInput) {
     entityId: "default",
     summary: result.success ? "Business and operational settings updated." : result.message,
   });
-  if (result.success) revalidatePath("/admin/settings");
+  if (result.success) {
+    revalidatePath("/admin/settings");
+    revalidatePath("/customer");
+  }
   return result;
 }

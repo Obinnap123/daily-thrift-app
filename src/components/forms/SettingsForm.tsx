@@ -27,8 +27,22 @@ export function SettingsForm({ initial }: { initial: SettingsInput }) {
       <section className="grid gap-4 sm:grid-cols-2" aria-labelledby="business-settings">
         <h3 id="business-settings" className="col-span-full font-semibold">Business details</h3>
         <Input label="Business name" value={settings.businessName} onChange={(e) => set("businessName", e.target.value)} />
-        <Input label="Support phone" value={settings.supportPhone ?? ""} onChange={(e) => set("supportPhone", e.target.value)} />
         <Input label="Support email" type="email" value={settings.supportEmail ?? ""} onChange={(e) => set("supportEmail", e.target.value)} />
+        <Input label="Support call number" type="tel" autoComplete="tel" inputMode="tel" value={settings.supportPhone ?? ""} onChange={(e) => set("supportPhone", e.target.value)} />
+        <div className="min-w-0">
+          <Input
+            id="support-whatsapp"
+            label="WhatsApp support number"
+            type="tel"
+            inputMode="tel"
+            aria-describedby="support-whatsapp-help"
+            value={settings.supportWhatsApp ?? ""}
+            onChange={(e) => set("supportWhatsApp", e.target.value)}
+          />
+          <p id="support-whatsapp-help" className="mt-1.5 text-xs leading-relaxed text-ink-muted">
+            Leave blank to use the support call number for WhatsApp too.
+          </p>
+        </div>
         <Input label="Business address" value={settings.businessAddress ?? ""} onChange={(e) => set("businessAddress", e.target.value)} />
         <div className="sm:col-span-2"><Input label="Receipt footer" value={settings.receiptFooter ?? ""} onChange={(e) => set("receiptFooter", e.target.value)} /></div>
       </section>

@@ -27,6 +27,7 @@ import { getBusinessSettings } from "@/server/services/settings.service";
 import { listMissingPaymentReportsForCustomer } from "@/server/repositories/missing-payment-report.repository";
 import { MissingPaymentReportButton } from "@/components/forms/MissingPaymentReportButton";
 import { dateKey, today } from "@/lib/date";
+import { resolveCustomerSupportContacts } from "@/lib/customer-support-contact";
 
 const REPORT_STATUS_TONE = { OPEN: "amber", RESOLVED: "green", DISMISSED: "gray" } as const;
 
@@ -47,8 +48,7 @@ export default async function CustomerDashboardPage() {
     getBusinessSettings(),
     listMissingPaymentReportsForCustomer(profile.id),
   ]);
-  const supportPhone = settings.supportPhone?.trim() || null;
-  const whatsappNumber = supportPhone ? toWhatsAppNumber(supportPhone) : null;
+  const { callNumber, whatsappNumber } = resolveCustomerSupportContacts(settings);
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -171,11 +171,11 @@ export default async function CustomerDashboardPage() {
                 If money you paid is not showing in your history or tracking sheet, report it for
                 an admin to investigate. Reports never add money automatically.
               </p>
-              {(supportPhone || settings.supportEmail) && (
+              {(callNumber || whatsappNumber || settings.supportEmail) && (
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {supportPhone && (
-                    <a href={`tel:${supportPhone}`} className="inline-flex min-h-11 items-center rounded-xl border border-line-strong bg-surface px-3 text-sm font-medium text-ink hover:bg-surface-hover">
-                      Call {supportPhone}
+                  {callNumber && (
+                    <a href={`tel:${callNumber}`} className="inline-flex min-h-11 items-center rounded-xl border border-line-strong bg-surface px-3 text-sm font-medium text-ink hover:bg-surface-hover">
+                      Call {callNumber}
                     </a>
                   )}
                   {whatsappNumber && (
@@ -242,12 +242,6 @@ export default async function CustomerDashboardPage() {
       </main>
     </div>
   );
-}
-
-function toWhatsAppNumber(phone: string): string | null {
-  const digits = phone.replace(/\D/g, "");
-  if (!digits) return null;
-  return digits.startsWith("0") ? `234${digits.slice(1)}` : digits;
 }
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {

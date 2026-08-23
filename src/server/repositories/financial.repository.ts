@@ -7,6 +7,7 @@ export async function getFinancialOverview() {
   const [row] = await prisma.$queryRaw<Array<{
     lifetime: unknown;
     active: unknown;
+    grossClosed: unknown;
     paid: unknown;
     paidToday: unknown;
     commission: unknown;
@@ -14,19 +15,21 @@ export async function getFinancialOverview() {
     SELECT
       COALESCE((SELECT SUM(c.amount) FROM contributions c WHERE c.status = 'COLLECTED'), 0) AS lifetime,
       COALESCE((SELECT SUM(c.amount) FROM contributions c JOIN contribution_plans p ON p.id = c."contributionPlanId" WHERE c.status = 'COLLECTED' AND p.status = 'ACTIVE'), 0) AS active,
+      COALESCE((SELECT SUM(p."grossSavings") FROM payouts p), 0) AS "grossClosed",
       COALESCE((SELECT SUM(p."customerAmount") FROM payouts p), 0) AS paid,
       COALESCE((SELECT SUM(p."customerAmount") FROM payouts p WHERE p."payoutDate" = ${businessDate}), 0) AS "paidToday",
       COALESCE((SELECT SUM(p."commissionAmount") FROM payouts p), 0) AS commission
   `;
 
   const lifetimeCollections = Number(row?.lifetime ?? 0);
+  const grossSavingsClosedByPayouts = Number(row?.grossClosed ?? 0);
   const paidOutToCustomersAllTime = Number(row?.paid ?? 0);
 
   return {
     lifetimeCollections,
     availableBalance: calculateAvailableBalance(
       lifetimeCollections,
-      paidOutToCustomersAllTime,
+      grossSavingsClosedByPayouts,
     ),
     activeSavings: Number(row?.active ?? 0),
     paidOutToday: Number(row?.paidToday ?? 0),

@@ -6,6 +6,7 @@ import { fail, ok } from "@/lib/action-result";
 export const settingsSchema = z.object({
   businessName: z.string().trim().min(2).max(100),
   supportPhone: z.string().trim().max(30).optional().or(z.literal("")),
+  supportWhatsApp: z.string().trim().max(30).optional().or(z.literal("")),
   supportEmail: z.string().trim().email().optional().or(z.literal("")),
   businessAddress: z.string().trim().max(250).optional().or(z.literal("")),
   receiptFooter: z.string().trim().max(250).optional().or(z.literal("")),

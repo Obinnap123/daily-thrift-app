@@ -25,6 +25,30 @@ import {
   createStaffVerificationToken,
   hashStaffVerificationToken,
 } from "../src/lib/staff-verification-token";
+import { resolveCustomerSupportContacts } from "../src/lib/customer-support-contact";
+
+test("customer support uses one shared call and WhatsApp number when no override is set", () => {
+  assert.deepEqual(
+    resolveCustomerSupportContacts({ supportPhone: "0803 123 4567", supportWhatsApp: "" }),
+    {
+      callNumber: "0803 123 4567",
+      whatsappNumber: "2348031234567",
+    },
+  );
+});
+
+test("a separate WhatsApp setting overrides only the WhatsApp contact", () => {
+  assert.deepEqual(
+    resolveCustomerSupportContacts({
+      supportPhone: "0803 123 4567",
+      supportWhatsApp: "+234 812 555 0199",
+    }),
+    {
+      callNumber: "0803 123 4567",
+      whatsappNumber: "2348125550199",
+    },
+  );
+});
 
 test("Quick Pay accepts a native date-input value and converts it to a Date", () => {
   const result = quickPaySchema.parse({
@@ -211,16 +235,19 @@ test("allocation rejects invalid financial inputs", () => {
   assert.throws(() => calculateContributionAllocation(500, 0, 0));
 });
 
-test("available balance subtracts only net customer payouts from lifetime collections", () => {
-  assert.equal(calculateAvailableBalance(100_000, 50_000), 50_000);
-  assert.equal(calculateAvailableBalance(103_000, 50_000), 53_000);
+test("available balance keeps savings belonging to customers who have not been paid out", () => {
+  assert.equal(calculateAvailableBalance(100_000, 60_000), 40_000);
+  assert.equal(calculateAvailableBalance(110_000, 60_000), 50_000);
 });
 
-test("available balance keeps commission because it is not part of the customer payout", () => {
+test("available balance removes both the customer amount and commission after payout", () => {
   const lifetimeCollections = 50_000;
-  const customerAmount = 49_500;
+  const grossSavingsClosedByPayouts = 50_000;
 
-  assert.equal(calculateAvailableBalance(lifetimeCollections, customerAmount), 500);
+  assert.equal(
+    calculateAvailableBalance(lifetimeCollections, grossSavingsClosedByPayouts),
+    0,
+  );
 });
 
 test("available balance rejects invalid aggregate values", () => {
