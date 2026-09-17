@@ -3,13 +3,11 @@
 /**
  * Customer dropdown with search — used inside the Quick Pay modal.
  * ----------------------------------------------------------------------------
- * Client-side filter over a pre-fetched customer list (name / phone /
- * customer code), rather than a debounced server search: the list passed
- * in is already correctly scoped server-side (an Agent only ever receives
- * their own customers — see listCustomerProfiles({ agentId }) call sites),
- * and thrift customer counts per agent/admin are small enough that
- * filtering in the browser is instant and avoids an extra network
- * round-trip per keystroke.
+ * Uses already-scoped customer options for instant local matches, then
+ * refreshes them with a debounced, role-scoped server search when supplied.
+ * Repeated queries are cached for the lifetime of the mounted modal and
+ * stale responses are ignored so a slower old query cannot replace newer
+ * results.
  */
 import { useMemo, useState, useRef, useEffect } from "react";
 import { cn } from "@/lib/utils";
@@ -41,43 +39,93 @@ export function CustomerSearchSelect({
   const [query, setQuery] = useState("");
   const [isOpen, setIsOpen] = useState(false);
   const [remoteOptions, setRemoteOptions] = useState<CustomerSearchOption[]>([]);
+  const [resolvedRemoteQuery, setResolvedRemoteQuery] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const searchCacheRef = useRef(new Map<string, CustomerSearchOption[]>());
+  const requestSequenceRef = useRef(0);
 
-  const selected = [...options, ...remoteOptions].find((option) => option.id === value) ?? null;
+  const availableOptions = useMemo(() => {
+    const uniqueOptions = new Map<string, CustomerSearchOption>();
+    for (const option of [...options, ...remoteOptions]) {
+      uniqueOptions.set(option.id, option);
+    }
+    return [...uniqueOptions.values()];
+  }, [options, remoteOptions]);
+
+  const selected = availableOptions.find((option) => option.id === value) ?? null;
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return options;
-    return options.filter(
+    if (!q) return availableOptions;
+    return availableOptions.filter(
       (option) =>
         option.name.toLowerCase().includes(q) ||
         option.customerCode.toLowerCase().includes(q) ||
         (option.phone ?? "").toLowerCase().includes(q)
     );
-  }, [options, query]);
+  }, [availableOptions, query]);
 
   useEffect(() => {
     if (!isOpen || !onSearch) return;
-    let active = true;
+    const normalizedQuery = query.trim();
+    const cacheKey = normalizedQuery.toLowerCase();
+    const cached = searchCacheRef.current.get(cacheKey);
+
+    if (cached) {
+      setRemoteOptions(cached);
+      setResolvedRemoteQuery(cacheKey);
+      setIsLoading(false);
+      return;
+    }
+
+    // Agent and tracking screens already provide a correctly scoped list.
+    // Show that list immediately when the field first opens instead of
+    // making an unnecessary empty-query round trip.
+    if (!normalizedQuery && options.length > 0) {
+      setResolvedRemoteQuery(null);
+      setIsLoading(false);
+      return;
+    }
+
+    const requestSequence = ++requestSequenceRef.current;
+    let cancelled = false;
     const timer = setTimeout(() => {
       setIsLoading(true);
-      void onSearch(query)
+      void onSearch(normalizedQuery)
         .then((result) => {
-          if (active) setRemoteOptions(result);
+          if (cancelled || requestSequence !== requestSequenceRef.current) return;
+          searchCacheRef.current.set(cacheKey, result);
+          setRemoteOptions(result);
+          setResolvedRemoteQuery(cacheKey);
+          setSearchError(null);
         })
         .catch(() => {
-          if (!active) return;
+          if (cancelled || requestSequence !== requestSequenceRef.current) return;
           setRemoteOptions([]);
+          setResolvedRemoteQuery(cacheKey);
           setSearchError("Customer search is temporarily unavailable. Please try again.");
         })
-        .finally(() => { if (active) setIsLoading(false); });
-    }, 250);
-    return () => { active = false; clearTimeout(timer); };
-  }, [isOpen, onSearch, query]);
+        .finally(() => {
+          if (!cancelled && requestSequence === requestSequenceRef.current) {
+            setIsLoading(false);
+          }
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [isOpen, onSearch, options, query]);
 
-  const visibleOptions = onSearch ? remoteOptions : filtered;
+  const normalizedQuery = query.trim().toLowerCase();
+  const hasCurrentRemoteResults = resolvedRemoteQuery === normalizedQuery;
+  const visibleOptions = onSearch
+    ? hasCurrentRemoteResults
+      ? remoteOptions
+      : filtered
+    : filtered;
 
   // Close the dropdown when clicking outside.
   useEffect(() => {
@@ -137,35 +185,42 @@ export function CustomerSearchSelect({
             >
               {searchError}
             </li>
-          ) : isLoading ? (
+          ) : visibleOptions.length === 0 && isLoading ? (
             <li className="px-3.5 py-3 text-sm text-ink-muted" role="status">Searching customers…</li>
           ) : visibleOptions.length === 0 ? (
             <li className="px-3.5 py-3 text-sm text-ink-muted">
               No customer with a savings plan matches this search.
             </li>
           ) : (
-            visibleOptions.map((option) => (
-              <li key={option.id} role="option" aria-selected={option.id === value}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onChange(option.id);
-                    setIsOpen(false);
-                    setQuery("");
-                  }}
-                  className={cn(
-                    "flex min-h-12 w-full flex-col items-start px-3.5 py-2 text-left text-sm hover:bg-brand-soft",
-                    option.id === value && "bg-brand-soft"
-                  )}
-                >
-                  <span className="font-medium text-ink">{option.name}</span>
-                  <span className="text-xs text-ink-muted">
-                    {option.customerCode}
-                    {option.phone ? ` · ${option.phone}` : ""}
-                  </span>
-                </button>
-              </li>
-            ))
+            <>
+              {visibleOptions.map((option) => (
+                <li key={option.id} role="option" aria-selected={option.id === value}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onChange(option.id);
+                      setIsOpen(false);
+                      setQuery("");
+                    }}
+                    className={cn(
+                      "flex min-h-12 w-full flex-col items-start px-3.5 py-2 text-left text-sm hover:bg-brand-soft",
+                      option.id === value && "bg-brand-soft"
+                    )}
+                  >
+                    <span className="font-medium text-ink">{option.name}</span>
+                    <span className="text-xs text-ink-muted">
+                      {option.customerCode}
+                      {option.phone ? ` · ${option.phone}` : ""}
+                    </span>
+                  </button>
+                </li>
+              ))}
+              {isLoading && (
+                <li className="border-t border-line px-3.5 py-2 text-xs text-ink-muted" role="status">
+                  Updating matches…
+                </li>
+              )}
+            </>
           )}
         </ul>
       )}

@@ -44,6 +44,7 @@ export const recordContributionSchema = z
     customerProfileId: z.string().min(1),
     status: z.enum(["COLLECTED", "MISSED"]),
     amount: decimalAmount.optional(),
+    monthlyDailyAmount: decimalAmount.optional(),
     note: z.string().trim().max(300, "Note is too long").optional().or(z.literal("")),
   })
   .refine((data) => data.status === "MISSED" || data.amount !== undefined, {
@@ -66,24 +67,23 @@ export type RecordContributionInput = z.infer<typeof recordContributionSchema>;
  * request that includes any paymentDate is silently pinned back to
  * today() by the service, never trusted from the client.
  *
- * isOverride / overrideReason: only ever honored when the caller is an
- * Admin (re-checked server-side in the service) — this is what allows an
- * Admin to record an approved same-day duplicate payment. `overrideReason`
- * is required whenever `isOverride` is true.
+ * A second genuine payment on the same day requires an explicit confirmation.
+ * clientRequestId keeps retries of that confirmation from recording twice.
  */
 export const quickPaySchema = z
   .object({
     customerProfileId: z.string().min(1, "Select a customer"),
     amount: decimalAmount,
+    monthlyDailyAmount: decimalAmount.optional(),
+    monthlyRates: z.array(z.object({
+      month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Select a valid calendar month"),
+      dailyAmount: decimalAmount,
+    })).max(120, "Too many monthly rates were submitted").optional().default([]),
     paymentMethod: z.enum(["CASH", "BANK_TRANSFER"]),
     paymentDate: z.coerce.date({ message: "Select a valid payment date" }).optional(),
     note: z.string().trim().max(300, "Note is too long").optional().or(z.literal("")),
-    isOverride: z.boolean().optional().default(false),
-    overrideReason: z.string().trim().max(300, "Reason is too long").optional().or(z.literal("")),
-  })
-  .refine((data) => !data.isOverride || !!data.overrideReason, {
-    message: "Enter a reason for overriding the duplicate-payment check",
-    path: ["overrideReason"],
+    confirmAdditionalPayment: z.boolean().optional().default(false),
+    clientRequestId: z.uuid("Please reopen Quick Pay and try again"),
   });
 
 export type QuickPayInput = z.infer<typeof quickPaySchema>;

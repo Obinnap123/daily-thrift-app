@@ -42,7 +42,6 @@ function getTodayState(plan: AgentPlan, businessDate: Date): CollectionDayState 
 
 function TodayOutcome({ plan, businessDate }: { plan: AgentPlan; businessDate: Date }) {
   const state = getTodayState(plan, businessDate);
-  const todayContribution = plan.contributions[0];
 
   if (state === "NOT_STARTED") {
     return (
@@ -61,7 +60,7 @@ function TodayOutcome({ plan, businessDate }: { plan: AgentPlan; businessDate: D
         <Badge tone="green">
           {state === "COVERED_IN_ADVANCE" ? "Covered in advance" : "Covered today"}
         </Badge>
-        {state === "COVERED_IN_ADVANCE" && !todayContribution && (
+        {(
           <QuickPayButton
             customers={[{
               id: plan.customerProfileId,
@@ -87,6 +86,19 @@ function TodayOutcome({ plan, businessDate }: { plan: AgentPlan; businessDate: D
         <p className="max-w-xs text-xs text-ink-muted">
           Today remains unfunded because this payment covered an older outstanding date.
         </p>
+        <QuickPayButton
+          customers={[{
+            id: plan.customerProfileId,
+            name: plan.customerProfile.user.name,
+            phone: plan.customerProfile.user.phone,
+            customerCode: plan.customerProfile.customerCode,
+          }]}
+          isAdmin={false}
+          initialCustomerProfileId={plan.customerProfileId}
+          label="Record More"
+          variant="secondary"
+          size="sm"
+        />
       </div>
     );
   }

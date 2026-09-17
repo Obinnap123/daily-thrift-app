@@ -14,6 +14,7 @@
 import Link from "next/link";
 import { Badge } from "@/components/ui/Badge";
 import { format } from "date-fns";
+import { RequestContributionCorrectionButton } from "@/components/forms/RequestContributionCorrectionButton";
 
 export interface PassbookRow {
   id: string;
@@ -31,9 +32,10 @@ interface PaymentHistoryTableProps {
   rows: PassbookRow[];
   /** "/admin/contributions" or "/agent/contributions" — printable receipt base path. */
   receiptBasePath: string;
+  canRequestCorrection?: boolean;
 }
 
-export function PaymentHistoryTable({ rows, receiptBasePath }: PaymentHistoryTableProps) {
+export function PaymentHistoryTable({ rows, receiptBasePath, canRequestCorrection = false }: PaymentHistoryTableProps) {
   if (rows.length === 0) {
     return (
       <p className="p-6 text-center text-sm text-gray-500">
@@ -52,7 +54,9 @@ export function PaymentHistoryTable({ rows, receiptBasePath }: PaymentHistoryTab
             <th className="px-4 py-3 font-medium">Amount</th>
             <th className="px-4 py-3 font-medium">Method</th>
             <th className="px-4 py-3 font-medium">Recorded By</th>
+            <th className="px-4 py-3 font-medium">Note</th>
             <th className="px-4 py-3 font-medium">Receipt</th>
+            {canRequestCorrection && <th className="px-4 py-3 font-medium">Correction</th>}
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
@@ -82,6 +86,7 @@ export function PaymentHistoryTable({ rows, receiptBasePath }: PaymentHistoryTab
                   : "—"}
               </td>
               <td className="px-4 py-3 text-gray-600">{row.collectedBy.name}</td>
+              <td className="max-w-xs px-4 py-3 text-gray-600">{row.note || "—"}</td>
               <td className="px-4 py-3">
                 {row.receiptNumber ? (
                   <Link
@@ -94,6 +99,13 @@ export function PaymentHistoryTable({ rows, receiptBasePath }: PaymentHistoryTab
                   "—"
                 )}
               </td>
+              {canRequestCorrection && (
+                <td className="px-4 py-3">
+                  {row.status === "COLLECTED" ? (
+                    <RequestContributionCorrectionButton contributionId={row.id} />
+                  ) : "—"}
+                </td>
+              )}
             </tr>
           ))}
         </tbody>

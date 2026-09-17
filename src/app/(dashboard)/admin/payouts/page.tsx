@@ -1,11 +1,10 @@
 /**
- * Admin > Maturity / Payout module.
+ * Admin payout workspace.
  * ----------------------------------------------------------------------------
  * Two sections on one page:
- *  1. "Ready for Payout" — plans that have reached COMPLETED (all required
- *     days paid) and have no Payout yet. Each row shows total savings +
- *     the plan's reference maturity date, with an inline RecordPayoutForm
- *     that both records the manual payout and marks the account Paid.
+ *  1. "Eligible for Payout" — active periods with enough unpaid funded
+ *     days. The dialog supports arbitrary calendar-month partial payouts
+ *     as well as closing the complete unpaid period.
  *  2. "Payout History" — every payout ever recorded, paginated, searchable
  *     by receipt number / customer name / code — this is also the data
  *     Reports > Payout History reuses.
@@ -23,6 +22,7 @@ import { Card } from "@/components/ui/Card";
 import { Pagination } from "@/components/ui/Pagination";
 import { PayoutRow } from "@/components/forms/PayoutRow";
 import { format } from "date-fns";
+import Link from "next/link";
 
 const ADMIN_NAV_LINKS = [
   { href: "/admin", label: "Overview" },
@@ -59,24 +59,23 @@ export default async function AdminPayoutsPage({ searchParams }: AdminPayoutsPag
       <main className="flex-1 space-y-6 p-4 sm:p-6">
         <div>
           <h2 className="text-lg font-semibold text-gray-900">
-            Ready for Payout ({readyPlans.length})
+            Eligible for Payout ({readyPlans.length})
           </h2>
           <p className="text-sm text-gray-500">
-            Customers whose savings cycle is complete. Pay them manually (cash or bank transfer)
-            outside this system first, then record the payout here.
+            Select any eligible unpaid month, including an incomplete month. Pay the customer
+            manually first, then record the partial or full payout here.
           </p>
         </div>
 
         <Card className="overflow-hidden p-0">
           {readyPlans.length === 0 ? (
             <p className="p-6 text-center text-gray-500">
-              No customers are currently ready for payout.
+              No customers are currently eligible for payout.
             </p>
           ) : (
             <>
               <div className="grid gap-3 p-3 md:hidden">
                 {readyPlans.map((plan) => {
-                  const grossSavings = plan.contributions.reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
                   return (
                     <article key={plan.id} className="rounded-xl border border-line bg-surface p-4">
                       <div className="mb-4">
@@ -84,10 +83,10 @@ export default async function AdminPayoutsPage({ searchParams }: AdminPayoutsPag
                         <p className="mt-0.5 text-sm text-ink-muted">{plan.customerProfile.user.phone ?? "No phone number"}</p>
                       </div>
                       <dl className="mb-4 grid grid-cols-2 gap-3 border-y border-line py-3 text-sm">
-                        <div><dt className="text-xs text-ink-subtle">Daily amount</dt><dd className="mt-1 font-medium tabular-nums text-ink">₦{Number(plan.dailyAmount).toLocaleString()}</dd></div>
+                        <div><dt className="text-xs text-ink-subtle">Unpaid months</dt><dd className="mt-1 font-medium tabular-nums text-ink">{plan.payoutMonths.length}</dd></div>
                         <div><dt className="text-xs text-ink-subtle">Maturity date</dt><dd className="mt-1 font-medium text-ink">{format(plan.expectedMaturityDate, "dd MMM yyyy")}</dd></div>
                       </dl>
-                      <PayoutRow contributionPlanId={plan.id} customerName={plan.customerProfile.user.name} dailyAmount={Number(plan.dailyAmount)} durationDays={plan.durationDays} grossSavings={grossSavings} />
+                      <PayoutRow contributionPlanId={plan.id} customerName={plan.customerProfile.user.name} months={plan.payoutMonths} commissionDays={plan.commissionDays} />
                     </article>
                   );
                 })}
@@ -96,7 +95,7 @@ export default async function AdminPayoutsPage({ searchParams }: AdminPayoutsPag
                 <thead className="border-b border-line bg-surface-muted text-ink-muted">
                   <tr>
                     <th scope="col" className="px-4 py-3 font-medium">Customer</th>
-                    <th scope="col" className="px-4 py-3 font-medium">Daily Amount</th>
+                    <th scope="col" className="px-4 py-3 font-medium">Unpaid Months</th>
                     <th scope="col" className="px-4 py-3 font-medium">Reference Maturity Date</th>
                     <th scope="col" className="px-4 py-3 font-medium">Action</th>
                   </tr>
@@ -105,10 +104,10 @@ export default async function AdminPayoutsPage({ searchParams }: AdminPayoutsPag
                   {readyPlans.map((plan) => (
                     <tr key={plan.id}>
                       <td className="px-4 py-3"><p className="font-medium text-ink">{plan.customerProfile.user.name}</p><p className="text-xs text-ink-muted">{plan.customerProfile.user.phone ?? "—"}</p></td>
-                      <td className="px-4 py-3 tabular-nums text-ink-muted">₦{Number(plan.dailyAmount).toLocaleString()}</td>
+                      <td className="px-4 py-3 tabular-nums text-ink-muted">{plan.payoutMonths.length}</td>
                       <td className="px-4 py-3 text-ink-muted">{format(plan.expectedMaturityDate, "dd MMM yyyy")}</td>
                       <td className="px-4 py-3">
-                        <PayoutRow contributionPlanId={plan.id} customerName={plan.customerProfile.user.name} dailyAmount={Number(plan.dailyAmount)} durationDays={plan.durationDays} grossSavings={plan.contributions.reduce((sum, row) => sum + Number(row.amount ?? 0), 0)} />
+                        <PayoutRow contributionPlanId={plan.id} customerName={plan.customerProfile.user.name} months={plan.payoutMonths} commissionDays={plan.commissionDays} />
                       </td>
                     </tr>
                   ))}
@@ -136,13 +135,17 @@ export default async function AdminPayoutsPage({ searchParams }: AdminPayoutsPag
                   <th className="px-4 py-3 font-medium">Method</th>
                   <th className="px-4 py-3 font-medium">Payout Date</th>
                   <th className="px-4 py-3 font-medium">Processed By</th>
+                  <th className="px-4 py-3 font-medium">Note</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {payouts.map((payout) => (
                   <tr key={payout.id}>
-                    <td className="px-4 py-3 font-mono text-xs text-gray-600">
-                      {payout.receiptNumber}
+                    <td className="px-4 py-3 text-xs">
+                      <Link href={`/admin/payouts/${encodeURIComponent(payout.receiptNumber)}`} className="inline-flex min-h-11 flex-col justify-center font-medium text-brand underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand" aria-label={`View or print payout receipt ${payout.receiptNumber}`}>
+                        <span className="font-mono">{payout.receiptNumber}</span>
+                        <span>View / print</span>
+                      </Link>
                     </td>
                     <td className="px-4 py-3 font-medium text-gray-900">
                       {payout.customerProfile.user.name}
@@ -157,6 +160,7 @@ export default async function AdminPayoutsPage({ searchParams }: AdminPayoutsPag
                       {format(payout.payoutDate, "dd MMM yyyy")}
                     </td>
                     <td className="px-4 py-3 text-gray-600">{payout.approvedBy.name}</td>
+                    <td className="max-w-xs px-4 py-3 text-gray-600">{payout.note || "—"}</td>
                   </tr>
                 ))}
               </tbody>

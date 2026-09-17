@@ -19,8 +19,16 @@ import { PrismaPg } from "@prisma/adapter-pg";
 const globalForPrisma = global as unknown as { prisma: PrismaClient };
 
 function createPrismaClient() {
+  // A local dev server is long-lived, so prefer Supabase's session pooler when
+  // it is configured. Vercel production remains on the transaction pooler in
+  // DATABASE_URL, which is designed for short-lived serverless requests.
+  const connectionString =
+    process.env.NODE_ENV === "development"
+      ? process.env.DIRECT_URL ?? process.env.DATABASE_URL
+      : process.env.DATABASE_URL;
+
   const adapter = new PrismaPg({
-    connectionString: process.env.DATABASE_URL,
+    connectionString,
     // Supabase session mode currently allows 15 clients. Keep this process's
     // pool deliberately small so Next.js workers/reloads cannot consume the
     // entire allowance. Queries wait briefly for a pooled connection instead

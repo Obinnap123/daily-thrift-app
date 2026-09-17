@@ -127,7 +127,7 @@ export default async function AdminDashboardPage() {
             handed over or the bank transfer has been completed outside this system.
           </p>
           {dueForPayout.length === 0 ? (
-            <p className="text-sm text-gray-500">No customers are currently ready for payout.</p>
+            <p className="text-sm text-gray-500">No customers are currently eligible for payout.</p>
           ) : (
             <ul className="divide-y divide-gray-100">
               {dueForPayout.slice(0, 5).map((plan) => (
@@ -146,8 +146,8 @@ export default async function AdminDashboardPage() {
                   <PayoutRow
                     contributionPlanId={plan.id}
                     customerName={plan.customerProfile.user.name}
-                    dailyAmount={Number(plan.dailyAmount)}
-                    durationDays={plan.durationDays}
+                    months={plan.payoutMonths}
+                    commissionDays={plan.commissionDays}
                   />
                 </li>
               ))}

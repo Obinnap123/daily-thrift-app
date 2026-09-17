@@ -10,8 +10,8 @@
  *    the day-to-day action agents use, so it's scoped the same way as every
  *    other agent-facing customer mutation in this app.
  *  - recordQuickPayAction: ADMIN, or the customer's own AGENT — same scope
- *    rule as recordContributionAction. The Admin-only override/backdating
- *    capability inside Quick Pay is gated a SECOND time inside
+ *    rule as recordContributionAction. Admin-only backdating
+ *    inside Quick Pay is gated a SECOND time inside
  *    recordQuickPay() itself (contribution.service.ts), by an explicit
  *    `actorIsAdmin` flag computed here from the re-verified session role —
  *    never from anything the client sent.
@@ -21,8 +21,8 @@ import { createContributionPlan } from "@/server/services/contribution-plan.serv
 import { recordContribution, recordQuickPay } from "@/server/services/contribution.service";
 import { findCustomerProfileWithUserId } from "@/server/repositories/customer.repository";
 import { findActivePlanForCustomer } from "@/server/repositories/contribution-plan.repository";
-import { findContributionForPlanAndDate } from "@/server/repositories/contribution.repository";
 import { today } from "@/lib/date";
+import { resolvePlanDailyRate } from "@/lib/plan-daily-rate";
 import type {
   CreateContributionPlanInput,
   RecordContributionInput,
@@ -37,10 +37,14 @@ import {
   writeAuditLog,
 } from "@/server/services/audit.service";
 import { quickPayRevalidationPaths } from "@/lib/contribution-revalidation";
+import { calendarMonthKey } from "@/lib/payout-selection";
 
 export async function searchQuickPayCustomersAction(query: string) {
   const user = await requireRole(["ADMIN", "AGENT"]);
-  const search = query.trim();
+  // Keep this bounded before passing it into a contains query. Apart from
+  // avoiding needlessly expensive input, this makes the server search match
+  // the short, human-entered name/phone/card-number terms used by the UI.
+  const search = query.trim().slice(0, 80);
   const customers = await prisma.customerProfile.findMany({
     where: {
       ...(user.role === "AGENT" ? { assignedAgentId: user.id } : {}),
@@ -50,6 +54,7 @@ export async function searchQuickPayCustomersAction(query: string) {
       contributionPlans: { some: {} },
       ...(search ? { OR: [
         { customerCode: { contains: search, mode: "insensitive" } },
+        { customerNumber: { contains: search, mode: "insensitive" } },
         { user: { name: { contains: search, mode: "insensitive" } } },
         { user: { phone: { contains: search } } },
       ] } : {}),
@@ -125,36 +130,76 @@ export async function recordContributionAction(input: RecordContributionInput) {
 /**
  * Look up a customer's active savings plan for the Quick Pay modal: shown
  * automatically once a customer is selected (plan's daily amount, to
- * pre-fill the Amount field), plus whether today already has a normal
- * (non-override) payment recorded — so the modal can warn the user (or, if
- * they're an Admin, offer the override checkbox) BEFORE they fill in the
- * rest of the form and submit.
+ * pre-fill the Amount field), plus today's payment count so the modal can
+ * request explicit confirmation of a genuine additional payment.
  */
 export async function getCustomerPlanForQuickPayAction(customerProfileId: string) {
   const { error } = await assertCanManageCustomer(customerProfileId);
   if (error) return error;
 
-  const plan = await findActivePlanForCustomer(customerProfileId);
+  const [plan, paymentsToday] = await Promise.all([
+    findActivePlanForCustomer(customerProfileId),
+    prisma.contribution.count({
+      where: { customerProfileId, collectionDate: today(), status: "COLLECTED" },
+    }),
+  ]);
   if (!plan) {
     const previous = await prisma.contributionPlan.findFirst({
       where: { customerProfileId },
       orderBy: { createdAt: "desc" },
     });
     if (!previous) {
-      return ok({ plan: null, alreadyPaidToday: false, startsNewPeriod: false });
+      return ok({ plan: null, paymentsToday, startsNewPeriod: false });
     }
     return ok({
-      plan: { id: previous.id, dailyAmount: Number(previous.dailyAmount), durationDays: 31 },
-      alreadyPaidToday: false,
+      plan: {
+        id: previous.id,
+        dailyAmount: Number(previous.dailyAmount),
+        durationDays: 31,
+        nextCoverageDate: (previous.nextCoverageDate ?? today()).toISOString(),
+        creditBalance: Number(previous.creditBalance),
+        monthlyRates: [],
+      },
+      paymentsToday,
       startsNewPeriod: true,
     });
   }
 
-  const existing = await findContributionForPlanAndDate(plan.id, today());
+  const coverageDate = plan.nextCoverageDate ?? plan.startDate;
+  const [monthlyRates, allocatedDates] = await Promise.all([
+    prisma.contributionMonthRate.findMany({
+      where: { contributionPlanId: plan.id },
+      orderBy: { monthStart: "asc" },
+    }),
+    prisma.contributionAllocation.findMany({
+      where: { contributionPlanId: plan.id },
+      select: { coverageDate: true },
+    }),
+  ]);
+  const lockedMonths = new Set(
+    allocatedDates.map((row) => calendarMonthKey(row.coverageDate)),
+  );
+  const currentRate = resolvePlanDailyRate({
+    initialDailyAmount: plan.dailyAmount,
+    startDate: plan.startDate,
+    coverageDate,
+    monthlyRates,
+  });
 
   return ok({
-    plan: { id: plan.id, dailyAmount: Number(plan.dailyAmount), durationDays: plan.durationDays },
-    alreadyPaidToday: !!existing,
+    plan: {
+      id: plan.id,
+      dailyAmount: currentRate.dailyAmount,
+      durationDays: plan.durationDays,
+      nextCoverageDate: coverageDate.toISOString(),
+      creditBalance: Number(plan.creditBalance),
+      monthlyRates: monthlyRates.map((rate) => ({
+        month: calendarMonthKey(rate.monthStart),
+        dailyAmount: Number(rate.dailyAmount),
+        locked: lockedMonths.has(calendarMonthKey(rate.monthStart)),
+      })),
+    },
+    paymentsToday,
     startsNewPeriod: false,
   });
 }

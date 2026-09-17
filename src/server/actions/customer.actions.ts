@@ -69,7 +69,7 @@ export async function reassignCustomerAgentAction(input: ReassignAgentInput) {
 }
 
 /**
- * Update a customer's profile (name, phone, ID number).
+ * Update a customer's profile (name, phone, customer card number).
  * Allowed for ADMIN (any customer) or AGENT (only their OWN assigned
  * customers — re-verified server-side below, never trusting the client).
  */

@@ -6,6 +6,7 @@ import { DashboardHeader } from "@/components/layout/DashboardHeader";
 import { DashboardNav } from "@/components/layout/DashboardNav";
 import { Card } from "@/components/ui/Card";
 import { PayoutRow } from "@/components/forms/PayoutRow";
+import Link from "next/link";
 
 const links = [
   { href: "/agent", label: "Overview" },
@@ -47,15 +48,16 @@ export default async function AgentPayoutsPage() {
             <>
               <div className="grid gap-3 p-3 md:hidden">
                 {plans.map((plan) => {
-                  const grossSavings = plan.contributions.reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
+                  const grossSavings = plan.payoutMonths.reduce((sum, month) => sum + month.grossSavings, 0);
+                  const fundedSlots = plan.payoutMonths.reduce((sum, month) => sum + month.fundedSlots, 0);
                   return (
                     <article key={plan.id} className="rounded-xl border border-line bg-surface p-4">
                       <h3 className="font-semibold text-ink">{plan.customerProfile.user.name}</h3>
                       <dl className="my-4 grid grid-cols-2 gap-3 border-y border-line py-3 text-sm">
-                        <div><dt className="text-xs text-ink-subtle">Funded days</dt><dd className="mt-1 font-medium tabular-nums text-ink">{plan._count.allocations}</dd></div>
+                        <div><dt className="text-xs text-ink-subtle">Funded days</dt><dd className="mt-1 font-medium tabular-nums text-ink">{fundedSlots}</dd></div>
                         <div><dt className="text-xs text-ink-subtle">Gross savings</dt><dd className="mt-1 font-medium tabular-nums text-ink">₦{grossSavings.toLocaleString()}</dd></div>
                       </dl>
-                      <PayoutRow contributionPlanId={plan.id} customerName={plan.customerProfile.user.name} dailyAmount={Number(plan.dailyAmount)} durationDays={31} grossSavings={grossSavings} receiptBasePath="/agent/payouts" />
+                      <PayoutRow contributionPlanId={plan.id} customerName={plan.customerProfile.user.name} months={plan.payoutMonths} commissionDays={plan.commissionDays} receiptBasePath="/agent/payouts" />
                     </article>
                   );
                 })}
@@ -66,13 +68,14 @@ export default async function AgentPayoutsPage() {
                 </thead>
                 <tbody className="divide-y divide-line">
                   {plans.map((plan) => {
-                    const grossSavings = plan.contributions.reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
+                    const grossSavings = plan.payoutMonths.reduce((sum, month) => sum + month.grossSavings, 0);
+                    const fundedSlots = plan.payoutMonths.reduce((sum, month) => sum + month.fundedSlots, 0);
                     return (
                       <tr key={plan.id}>
                         <td className="px-4 py-3 font-medium text-ink">{plan.customerProfile.user.name}</td>
-                        <td className="px-4 py-3 tabular-nums text-ink-muted">{plan._count.allocations}</td>
+                        <td className="px-4 py-3 tabular-nums text-ink-muted">{fundedSlots}</td>
                         <td className="px-4 py-3 tabular-nums text-ink-muted">₦{grossSavings.toLocaleString()}</td>
-                        <td className="px-4 py-3"><PayoutRow contributionPlanId={plan.id} customerName={plan.customerProfile.user.name} dailyAmount={Number(plan.dailyAmount)} durationDays={31} grossSavings={grossSavings} receiptBasePath="/agent/payouts" /></td>
+                        <td className="px-4 py-3"><PayoutRow contributionPlanId={plan.id} customerName={plan.customerProfile.user.name} months={plan.payoutMonths} commissionDays={plan.commissionDays} receiptBasePath="/agent/payouts" /></td>
                       </tr>
                     );
                   })}
@@ -91,9 +94,9 @@ export default async function AgentPayoutsPage() {
             <p className="p-6 text-center text-sm text-ink-muted">No payouts recorded.</p>
           ) : (
             <table className="w-full text-left text-sm">
-              <thead className="border-b border-line bg-surface-muted text-ink-muted"><tr><th scope="col" className="px-4 py-3">Receipt</th><th scope="col" className="px-4 py-3">Customer</th><th scope="col" className="px-4 py-3">Customer received</th><th scope="col" className="px-4 py-3">Date</th><th scope="col" className="px-4 py-3">Processed by</th></tr></thead>
+              <thead className="border-b border-line bg-surface-muted text-ink-muted"><tr><th scope="col" className="px-4 py-3">Receipt</th><th scope="col" className="px-4 py-3">Customer</th><th scope="col" className="px-4 py-3">Customer received</th><th scope="col" className="px-4 py-3">Date</th><th scope="col" className="px-4 py-3">Processed by</th><th scope="col" className="px-4 py-3">Note</th></tr></thead>
               <tbody className="divide-y divide-line">
-                {history.map((payout) => <tr key={payout.id}><td className="px-4 py-3 font-mono text-xs">{payout.receiptNumber}</td><td className="px-4 py-3">{payout.customerProfile.user.name}</td><td className="px-4 py-3 tabular-nums">₦{Number(payout.customerAmount).toLocaleString()}</td><td className="px-4 py-3">{format(payout.payoutDate, "dd MMM yyyy")}</td><td className="px-4 py-3">{payout.approvedBy.name}</td></tr>)}
+                {history.map((payout) => <tr key={payout.id}><td className="px-4 py-3 text-xs"><Link href={`/agent/payouts/${encodeURIComponent(payout.receiptNumber)}`} className="inline-flex min-h-11 flex-col justify-center font-medium text-brand underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand" aria-label={`View or print payout receipt ${payout.receiptNumber}`}><span className="font-mono">{payout.receiptNumber}</span><span>View / print</span></Link></td><td className="px-4 py-3">{payout.customerProfile.user.name}</td><td className="px-4 py-3 tabular-nums">₦{Number(payout.customerAmount).toLocaleString()}</td><td className="px-4 py-3">{format(payout.payoutDate, "dd MMM yyyy")}</td><td className="px-4 py-3">{payout.approvedBy.name}</td><td className="max-w-xs px-4 py-3">{payout.note || "—"}</td></tr>)}
               </tbody>
             </table>
           )}

@@ -8,7 +8,7 @@
  * case ("customer paid the usual amount") is a single click.
  */
 import { useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import type { z } from "zod";
@@ -34,7 +34,7 @@ export function RecordContributionForm({
   const {
     register,
     handleSubmit,
-    watch,
+    control,
     formState: { errors, isSubmitting },
   } = useForm<
     z.input<typeof recordContributionSchema>,
@@ -42,10 +42,15 @@ export function RecordContributionForm({
     RecordContributionInput
   >({
     resolver: zodResolver(recordContributionSchema),
-    defaultValues: { customerProfileId, status: "COLLECTED", amount: defaultAmount },
+    defaultValues: {
+      customerProfileId,
+      status: "COLLECTED",
+      amount: defaultAmount,
+      monthlyDailyAmount: defaultAmount,
+    },
   });
 
-  const status = watch("status");
+  const status = useWatch({ control, name: "status" });
 
   async function onSubmit(data: RecordContributionInput) {
     setFormError(null);
@@ -68,6 +73,7 @@ export function RecordContributionForm({
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="flex flex-wrap items-end gap-2">
       <input type="hidden" {...register("customerProfileId")} />
+      <input type="hidden" {...register("monthlyDailyAmount")} />
 
       <select
         aria-label="Collection status"

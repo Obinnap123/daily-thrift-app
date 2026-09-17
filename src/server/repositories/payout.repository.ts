@@ -12,12 +12,13 @@ export async function findPayoutById(payoutId: string) {
       customerProfile: { include: { user: { select: { name: true, phone: true } } } },
       approvedBy: { select: { id: true, name: true } },
       contributionPlan: true,
+      months: { orderBy: { monthStart: "asc" } },
     },
   });
 }
 
 export async function findPayoutByPlanId(contributionPlanId: string) {
-  return prisma.payout.findUnique({ where: { contributionPlanId } });
+  return prisma.payout.findFirst({ where: { contributionPlanId }, orderBy: { createdAt: "desc" } });
 }
 
 /** Look up a payout by its printed receipt number — used by the printable receipt page. */
@@ -28,6 +29,7 @@ export async function findPayoutByReceiptNumber(receiptNumber: string) {
       customerProfile: { include: { user: { select: { name: true, phone: true } } } },
       approvedBy: { select: { id: true, name: true } },
       contributionPlan: true,
+      months: { orderBy: { monthStart: "asc" } },
     },
   });
 }

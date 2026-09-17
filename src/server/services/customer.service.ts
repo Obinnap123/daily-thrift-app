@@ -30,7 +30,7 @@ import {
 } from "@/validations/customer";
 import { findUserByPhone } from "@/server/repositories/user.repository";
 import {
-  findCustomerProfileByIdNumber,
+  findCustomerProfileByCustomerNumber,
   findCustomerProfileWithUserId,
   countCustomerFinancialActivity,
 } from "@/server/repositories/customer.repository";
@@ -40,7 +40,7 @@ import { ok, fail, type ActionResult } from "@/lib/action-result";
 /**
  * Register a new customer.
  *
- * @param input        Form data (name, phone, idNumber, assignedAgentId, password).
+ * @param input        Form data (name, phone, customer number, assigned agent, password).
  * @param performedById The id of the Admin/Agent performing this registration
  *                      (recorded as the assignment log's `changedBy`).
  */
@@ -53,7 +53,7 @@ export async function registerCustomer(
     return fail("Please correct the highlighted fields.");
   }
 
-  const { fullName, phone, idNumber, assignedAgentId, password } = parsed.data;
+  const { fullName, phone, customerNumber, assignedAgentId, password } = parsed.data;
   const normalizedPhone = normalizePhone(phone);
 
   // Friendly duplicate checks up front (avoids a raw constraint-violation
@@ -65,10 +65,10 @@ export async function registerCustomer(
     });
   }
 
-  const existingByIdNumber = await findCustomerProfileByIdNumber(idNumber);
-  if (existingByIdNumber) {
-    return fail("A customer with this ID number is already registered.", {
-      idNumber: "This ID number is already registered.",
+  const existingByCustomerNumber = await findCustomerProfileByCustomerNumber(customerNumber);
+  if (existingByCustomerNumber) {
+    return fail("A customer with this customer number is already registered.", {
+      customerNumber: "This customer number is already registered.",
     });
   }
 
@@ -114,7 +114,7 @@ export async function registerCustomer(
     const customerProfile = await tx.customerProfile.create({
       data: {
         userId: user.id,
-        idNumber,
+        customerNumber,
         assignedAgentId,
         customerCode,
       },
@@ -137,7 +137,7 @@ export async function registerCustomer(
 }
 
 /**
- * Update a customer's editable profile fields (name, phone, ID number).
+ * Update a customer's editable profile fields (name, phone, customer number).
  * Does NOT touch assignedAgentId (see editCustomerSchema comment).
  */
 export async function updateCustomer(
@@ -148,7 +148,7 @@ export async function updateCustomer(
     return fail("Please correct the highlighted fields.");
   }
 
-  const { customerProfileId, fullName, phone, idNumber } = parsed.data;
+  const { customerProfileId, fullName, phone, customerNumber } = parsed.data;
 
   const existing = await findCustomerProfileWithUserId(customerProfileId);
   if (!existing) {
@@ -158,7 +158,7 @@ export async function updateCustomer(
   const normalizedPhone = normalizePhone(phone);
 
   // Duplicate checks that EXCLUDE this customer's own current record —
-  // otherwise editing a customer without changing their phone/ID number
+  // otherwise editing a customer without changing their phone/customer number
   // would incorrectly flag "already registered" against themselves.
   const existingByPhone = await findUserByPhone(normalizedPhone);
   if (existingByPhone && existingByPhone.id !== existing.userId) {
@@ -167,11 +167,11 @@ export async function updateCustomer(
     });
   }
 
-  if (idNumber !== existing.idNumber) {
-    const existingByIdNumber = await findCustomerProfileByIdNumber(idNumber);
-    if (existingByIdNumber && existingByIdNumber.id !== customerProfileId) {
-      return fail("Another customer is already registered with this ID number.", {
-        idNumber: "This ID number is already registered.",
+  if (customerNumber !== existing.customerNumber) {
+    const existingByCustomerNumber = await findCustomerProfileByCustomerNumber(customerNumber);
+    if (existingByCustomerNumber && existingByCustomerNumber.id !== customerProfileId) {
+      return fail("Another customer is already registered with this customer number.", {
+        customerNumber: "This customer number is already registered.",
       });
     }
   }
@@ -191,7 +191,7 @@ export async function updateCustomer(
     });
     await tx.customerProfile.update({
       where: { id: customerProfileId },
-      data: { idNumber },
+      data: { customerNumber },
     });
   });
 

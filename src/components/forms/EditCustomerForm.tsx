@@ -2,12 +2,12 @@
 
 /**
  * Edit Customer form (client component) — Admin or the customer's own Agent.
- * Editable fields: full name, phone, ID number. Agent assignment and photo
+ * Editable fields: full name, phone, customer card number. Agent assignment
  * are deliberately handled by separate, dedicated flows (see
  * editCustomerSchema comment in validations/customer.ts).
  */
 import { useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import { editCustomerSchema, type EditCustomerInput } from "@/validations/customer";
@@ -21,7 +21,7 @@ interface EditCustomerFormProps {
     id: string;
     fullName: string;
     phone: string | null;
-    idNumber: string;
+    customerNumber: string;
   };
 }
 
@@ -33,6 +33,7 @@ export function EditCustomerForm({ customer }: EditCustomerFormProps) {
   const {
     register,
     handleSubmit,
+    control,
     setError,
     formState: { errors, isSubmitting },
   } = useForm<EditCustomerInput>({
@@ -41,9 +42,10 @@ export function EditCustomerForm({ customer }: EditCustomerFormProps) {
       customerProfileId: customer.id,
       fullName: customer.fullName,
       phone: customer.phone ?? "",
-      idNumber: customer.idNumber,
+      customerNumber: customer.customerNumber,
     },
   });
+  const phoneDigits = (useWatch({ control, name: "phone" }) ?? "").length;
 
   async function onSubmit(data: EditCustomerInput) {
     setFormError(null);
@@ -77,14 +79,26 @@ export function EditCustomerForm({ customer }: EditCustomerFormProps) {
       <Input
         label="Phone number"
         type="tel"
+        inputMode="numeric"
+        pattern="[0-9]*"
+        maxLength={11}
         autoComplete="tel"
         error={errors.phone?.message}
+        aria-describedby="customer-phone-help"
+        onInput={(event) => {
+          event.currentTarget.value = event.currentTarget.value.replace(/\D/g, "").slice(0, 11);
+        }}
         {...register("phone")}
       />
+      <p id="customer-phone-help" className="-mt-3 text-xs text-ink-muted">
+        {phoneDigits >= 11
+          ? "11 of 11 digits entered. Edit the number if needed."
+          : `${phoneDigits} of 11 digits entered.`}
+      </p>
       <Input
-        label="ID number"
-        error={errors.idNumber?.message}
-        {...register("idNumber")}
+        label="Customer No."
+        error={errors.customerNumber?.message}
+        {...register("customerNumber")}
       />
 
       {formError && (

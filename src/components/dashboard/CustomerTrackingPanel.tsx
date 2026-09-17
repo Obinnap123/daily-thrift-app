@@ -37,6 +37,7 @@ import { MonthlyTrackingSheets } from "@/components/dashboard/MonthlyTrackingShe
 interface CustomerTrackingPanelProps {
   customerProfileId: string;
   planWithProgress: {
+    currentRate: { dailyAmount: number; month: string };
     plan: {
       dailyAmount: unknown;
       durationDays: number;
@@ -88,8 +89,8 @@ export function CustomerTrackingPanel({
             />
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
               <SummaryStat
-                label="Daily amount"
-                value={`₦${Number(planWithProgress.plan.dailyAmount).toLocaleString()}`}
+                label={`Latest agreed daily rate (${format(new Date(`${planWithProgress.currentRate.month}-01T00:00:00.000Z`), "MMM yyyy")})`}
+                value={`₦${planWithProgress.currentRate.dailyAmount.toLocaleString()}`}
               />
               <SummaryStat
                 label="Total saved"
@@ -124,8 +125,8 @@ export function CustomerTrackingPanel({
               Record a Payment
             </h3>
             <p className="mt-1 text-sm text-gray-500">
-              Record today&apos;s (or, for Admins, a backdated/override) payment for this
-              customer without leaving this page.
+              Record a payment for this customer without leaving this page. Additional
+              payments today are supported; Admins can also choose a past payment date.
             </p>
           </div>
           <QuickPayButton
@@ -148,7 +149,7 @@ export function CustomerTrackingPanel({
             printable receipt.
           </p>
         </div>
-        <PaymentHistoryTable rows={passbookRows} receiptBasePath={receiptBasePath} />
+        <PaymentHistoryTable rows={passbookRows} receiptBasePath={receiptBasePath} canRequestCorrection={!isAdmin} />
       </Card>
     </>
   );

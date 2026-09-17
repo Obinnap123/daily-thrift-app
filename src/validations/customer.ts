@@ -10,6 +10,11 @@ const passwordField = z
   .regex(/[a-z]/, "Password must contain at least one lowercase letter")
   .regex(/[0-9]/, "Password must contain at least one number");
 
+const customerPhoneField = z
+  .string()
+  .trim()
+  .regex(/^\d{11}$/, "Phone number must be exactly 11 digits");
+
 /**
  * Customer registration form.
  * ----------------------------------------------------------------------------
@@ -21,15 +26,12 @@ const passwordField = z
 export const registerCustomerSchema = z
   .object({
     fullName: z.string().trim().min(2, "Full name must be at least 2 characters"),
-    phone: z
+    phone: customerPhoneField,
+    customerNumber: z
       .string()
       .trim()
-      .regex(/^[0-9+\s-]{7,15}$/, "Enter a valid phone number"),
-    idNumber: z
-      .string()
-      .trim()
-      .min(4, "ID number must be at least 4 characters")
-      .max(50, "ID number is too long"),
+      .min(4, "Customer number must be at least 4 characters")
+      .max(50, "Customer number is too long"),
     /// The agent this customer will be assigned to. Required — every
     /// customer must have exactly one responsible agent at all times.
     assignedAgentId: z.string().min(1, "Select an agent"),
@@ -68,15 +70,12 @@ export type ReassignAgentInput = z.infer<typeof reassignAgentSchema>;
 export const editCustomerSchema = z.object({
   customerProfileId: z.string().min(1),
   fullName: z.string().trim().min(2, "Full name must be at least 2 characters"),
-  phone: z
+  phone: customerPhoneField,
+  customerNumber: z
     .string()
     .trim()
-    .regex(/^[0-9+\s-]{7,15}$/, "Enter a valid phone number"),
-  idNumber: z
-    .string()
-    .trim()
-    .min(4, "ID number must be at least 4 characters")
-    .max(50, "ID number is too long"),
+    .min(4, "Customer number must be at least 4 characters")
+    .max(50, "Customer number is too long"),
 });
 
 export type EditCustomerInput = z.infer<typeof editCustomerSchema>;

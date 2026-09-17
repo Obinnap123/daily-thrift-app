@@ -14,6 +14,7 @@ export const APP_NAVIGATION: Record<NavigationRole, AppNavigationItem[]> = {
     { href: "/admin/tracking", label: "Tracking", icon: "tracking" },
     { href: "/admin/payouts", label: "Payouts", icon: "money" },
     { href: "/admin/payment-reports", label: "Payment reports", icon: "report" },
+    { href: "/admin/corrections", label: "Payment corrections", icon: "audit" },
     { href: "/admin/reconciliations", label: "Reconciliations", icon: "check" },
     { href: "/admin/reports", label: "Reports", icon: "report" },
     { href: "/admin/audit", label: "Audit log", icon: "audit" },
@@ -24,6 +25,7 @@ export const APP_NAVIGATION: Record<NavigationRole, AppNavigationItem[]> = {
     { href: "/agent/tracking", label: "Tracking", icon: "tracking" },
     { href: "/agent/payouts", label: "Payouts", icon: "money" },
     { href: "/agent/collections", label: "Today's collections", icon: "customer" },
+    { href: "/agent/corrections", label: "Payment corrections", icon: "audit" },
     { href: "/agent/reconciliation", label: "End-of-day report", icon: "check" },
   ],
 };

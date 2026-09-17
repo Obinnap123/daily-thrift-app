@@ -61,14 +61,16 @@ export function QuickPayButton({
         {label}
       </Button>
 
-      <QuickPayModal
-        isOpen={isOpen}
-        onClose={() => setIsOpen(false)}
-        customers={customers}
-        isAdmin={isAdmin}
-        initialCustomerProfileId={initialCustomerProfileId}
-        onSuccess={onSuccess}
-      />
+      {isOpen && (
+        <QuickPayModal
+          isOpen
+          onClose={() => setIsOpen(false)}
+          customers={customers}
+          isAdmin={isAdmin}
+          initialCustomerProfileId={initialCustomerProfileId}
+          onSuccess={onSuccess}
+        />
+      )}
     </>
   );
 }

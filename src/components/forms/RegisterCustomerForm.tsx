@@ -15,7 +15,7 @@
  * matter what this form sends. See server/actions/customer.actions.ts.
  */
 import { useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import { registerCustomerSchema, type RegisterCustomerInput } from "@/validations/customer";
@@ -52,6 +52,7 @@ export function RegisterCustomerForm({
   const {
     register,
     handleSubmit,
+    control,
     setError,
     formState: { errors, isSubmitting },
   } = useForm<RegisterCustomerInput>({
@@ -60,6 +61,7 @@ export function RegisterCustomerForm({
       assignedAgentId: currentAgentId ?? "",
     },
   });
+  const phoneDigits = (useWatch({ control, name: "phone" }) ?? "").length;
 
   async function onSubmit(data: RegisterCustomerInput) {
     setFormError(null);
@@ -97,20 +99,29 @@ export function RegisterCustomerForm({
       <Input
         label="Phone number"
         type="tel"
+        inputMode="numeric"
+        pattern="[0-9]*"
+        maxLength={11}
         autoComplete="tel"
-        placeholder="0803 123 4567"
+        placeholder="08031234567"
         error={errors.phone?.message}
+        aria-describedby="customer-phone-help"
+        onInput={(event) => {
+          event.currentTarget.value = event.currentTarget.value.replace(/\D/g, "").slice(0, 11);
+        }}
         {...register("phone")}
       />
-      <p className="-mt-3 text-xs text-gray-500">
-        The customer will log in using this phone number.
+      <p id="customer-phone-help" className="-mt-3 text-xs text-ink-muted">
+        {phoneDigits >= 11
+          ? "11 of 11 digits entered. Edit the number if needed."
+          : `${phoneDigits} of 11 digits entered. The customer will log in using this number.`}
       </p>
 
       <Input
-        label="ID number"
-        placeholder="e.g. National ID, Voter's Card number"
-        error={errors.idNumber?.message}
-        {...register("idNumber")}
+        label="Customer No."
+        placeholder="e.g. DDT-CARD-001"
+        error={errors.customerNumber?.message}
+        {...register("customerNumber")}
       />
 
       {agents ? (
