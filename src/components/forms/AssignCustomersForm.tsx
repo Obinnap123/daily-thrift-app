@@ -22,7 +22,7 @@ import { useToast } from "@/components/providers/ToastProvider";
 
 interface CandidateCustomer {
   id: string;
-  idNumber: string;
+  customerNumber: string;
   customerCode: string;
   user: { id: string; name: string; phone: string | null };
   assignedAgent: { id: string; name: string };
@@ -49,7 +49,7 @@ export function AssignCustomersForm({ agentId, candidates }: AssignCustomersForm
       (customer) =>
         customer.user.name.toLowerCase().includes(query) ||
         customer.customerCode.toLowerCase().includes(query) ||
-        customer.idNumber.toLowerCase().includes(query) ||
+        customer.customerNumber.toLowerCase().includes(query) ||
         (customer.user.phone ?? "").includes(query)
     );
   }, [candidates, filterText]);
@@ -104,7 +104,7 @@ export function AssignCustomersForm({ agentId, candidates }: AssignCustomersForm
   return (
     <div className="flex flex-col gap-4">
       <Input
-        placeholder="Filter by name, code, ID number, or phone…"
+        placeholder="Filter by name, customer number, code, or phone…"
         value={filterText}
         onChange={(event) => setFilterText(event.target.value)}
         aria-label="Filter candidate customers"

@@ -29,7 +29,12 @@ interface ModalProps {
 export function Modal({ isOpen, onClose, title, children, panelClassName }: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
   const titleId = useId();
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   // Close on Escape, and lock page scroll while open.
   useEffect(() => {
@@ -38,7 +43,7 @@ export function Modal({ isOpen, onClose, title, children, panelClassName }: Moda
     previousFocusRef.current = document.activeElement as HTMLElement | null;
 
     function handleKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") onCloseRef.current();
     }
     document.addEventListener("keydown", handleKeyDown);
 
@@ -53,7 +58,7 @@ export function Modal({ isOpen, onClose, title, children, panelClassName }: Moda
       document.body.style.overflow = previousOverflow;
       previousFocusRef.current?.focus();
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 

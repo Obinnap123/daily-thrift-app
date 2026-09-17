@@ -72,7 +72,7 @@ export default async function CustomerDashboardPage() {
             <dl className="space-y-3 text-sm">
               <Row label="Full name" value={profile.user.name} />
               <Row label="Phone" value={profile.user.phone ?? "—"} />
-              <Row label="ID number" value={profile.idNumber} />
+              <Row label="Customer No." value={profile.customerNumber} />
               <Row
                 label="Status"
                 value={
@@ -126,8 +126,8 @@ export default async function CustomerDashboardPage() {
           {planWithProgress ? (
             <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
               <ProgressStat
-                label="Daily contribution"
-                value={`₦${Number(planWithProgress.plan.dailyAmount).toLocaleString()}`}
+                label={`Latest agreed daily rate (${format(new Date(`${planWithProgress.currentRate.month}-01T00:00:00.000Z`), "MMM yyyy")})`}
+                value={`₦${planWithProgress.currentRate.dailyAmount.toLocaleString()}`}
               />
               <ProgressStat
                 label="Total saved so far"

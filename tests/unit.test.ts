@@ -26,6 +26,75 @@ import {
   hashStaffVerificationToken,
 } from "../src/lib/staff-verification-token";
 import { resolveCustomerSupportContacts } from "../src/lib/customer-support-contact";
+import {
+  buildPayoutMonthOptions,
+  calculatePayout,
+} from "../src/lib/payout-selection";
+import { previewRequiredMonthlyRates } from "../src/lib/monthly-rate-preview";
+import { resolvePlanDailyRate } from "../src/lib/plan-daily-rate";
+import {
+  assessContributionCorrection,
+  SETTLED_CORRECTION_MESSAGE,
+  UNTRACEABLE_CORRECTION_MESSAGE,
+} from "../src/lib/contribution-correction-safety";
+
+test("the displayed daily rate follows the latest agreed month without rewriting the original plan rate", () => {
+  const plan = {
+    initialDailyAmount: 500,
+    startDate: new Date("2026-08-01T00:00:00Z"),
+    monthlyRates: [
+      { monthStart: new Date("2026-08-01T00:00:00Z"), dailyAmount: 500 },
+      { monthStart: new Date("2026-09-01T00:00:00Z"), dailyAmount: 1000 },
+    ],
+  };
+  assert.deepEqual(resolvePlanDailyRate({ ...plan, coverageDate: new Date("2026-08-21T00:00:00Z") }), { dailyAmount: 500, month: "2026-08" });
+  assert.deepEqual(resolvePlanDailyRate({ ...plan, coverageDate: new Date("2026-09-17T00:00:00Z") }), { dailyAmount: 1000, month: "2026-09" });
+  assert.deepEqual(resolvePlanDailyRate({ ...plan, coverageDate: new Date("2026-10-02T00:00:00Z") }), { dailyAmount: 1000, month: "2026-09" });
+});
+import { recordPayoutSchema } from "../src/validations/payout";
+import {
+  applyContributionCorrectionSchema,
+  reviewContributionCorrectionSchema,
+} from "../src/validations/contribution-correction";
+
+test("a fully allocated payment in an unpaid month can be corrected after another month was paid out", () => {
+  const result = assessContributionCorrection({
+    amount: 1000,
+    allocations: [{ coverageDate: new Date("2026-10-02T00:00:00Z"), amount: 1000, payoutMonthId: null }],
+    payoutCount: 1,
+    settledMonths: [{ monthStart: new Date("2026-09-01T00:00:00Z"), creditAmount: 0 }],
+    hasOrphanAllocations: false,
+  });
+  assert.equal(result.error, null);
+  assert.deepEqual([...result.settledMonthKeys], ["2026-09"]);
+});
+
+test("a contribution touching a paid month remains locked even if another month is unpaid", () => {
+  const result = assessContributionCorrection({
+    amount: 2000,
+    allocations: [
+      { coverageDate: new Date("2026-09-30T00:00:00Z"), amount: 1000, payoutMonthId: null },
+      { coverageDate: new Date("2026-10-01T00:00:00Z"), amount: 1000, payoutMonthId: null },
+    ],
+    payoutCount: 1,
+    settledMonths: [{ monthStart: new Date("2026-09-01T00:00:00Z"), creditAmount: 0 }],
+    hasOrphanAllocations: false,
+  });
+  assert.equal(result.error, SETTLED_CORRECTION_MESSAGE);
+});
+
+test("payout credit and unallocated payment remainders are not treated as proven unpaid money", () => {
+  const base = {
+    amount: 1000,
+    allocations: [{ coverageDate: new Date("2026-10-01T00:00:00Z"), amount: 1000, payoutMonthId: null }],
+    payoutCount: 1,
+    settledMonths: [{ monthStart: new Date("2026-09-01T00:00:00Z"), creditAmount: 0 }],
+    hasOrphanAllocations: false,
+  };
+  assert.equal(assessContributionCorrection({ ...base, amount: 1500 }).error, UNTRACEABLE_CORRECTION_MESSAGE);
+  assert.equal(assessContributionCorrection({ ...base, settledMonths: [{ ...base.settledMonths[0], creditAmount: 500 }] }).error, UNTRACEABLE_CORRECTION_MESSAGE);
+  assert.equal(assessContributionCorrection({ ...base, hasOrphanAllocations: true }).error, UNTRACEABLE_CORRECTION_MESSAGE);
+});
 
 test("customer support uses one shared call and WhatsApp number when no override is set", () => {
   assert.deepEqual(
@@ -56,23 +125,33 @@ test("Quick Pay accepts a native date-input value and converts it to a Date", ()
     amount: "2000",
     paymentMethod: "CASH",
     paymentDate: "2026-08-17",
-    isOverride: false,
+    clientRequestId: "e7b93ddd-11ca-4f37-a08b-9714bd036067",
   });
 
   assert.equal(result.amount, 2000);
   assert.equal(result.paymentDate?.toISOString(), "2026-08-17T00:00:00.000Z");
 });
 
-test("Quick Pay requires a reason for an Admin override", () => {
+test("Quick Pay accepts an explicitly confirmed additional same-day payment", () => {
   const result = quickPaySchema.safeParse({
     customerProfileId: "customer-1",
     amount: 500,
     paymentMethod: "CASH",
     paymentDate: "2026-08-17",
-    isOverride: true,
-    overrideReason: "",
+    confirmAdditionalPayment: true,
+    clientRequestId: "e7b93ddd-11ca-4f37-a08b-9714bd036067",
   });
 
+  assert.equal(result.success, true);
+});
+
+test("Quick Pay rejects a malformed request token", () => {
+  const result = quickPaySchema.safeParse({
+    customerProfileId: "customer-1",
+    amount: 500,
+    paymentMethod: "CASH",
+    clientRequestId: "not-a-uuid",
+  });
   assert.equal(result.success, false);
 });
 
@@ -303,4 +382,209 @@ test("reconciliation lock also casts PostgreSQL void to text", async () => {
   assert.match(calls[0].sql, /pg_advisory_xact_lock/);
   assert.match(calls[0].sql, /::text AS "lockResult"/);
   assert.deepEqual(calls[0].values, ["reconciliation:agent-1:2026-08-17"]);
+});
+
+test("Quick Pay accepts one daily payment when amount equals the monthly rate", () => {
+  const parsed = quickPaySchema.safeParse({
+    customerProfileId: "customer-1",
+    amount: 500,
+    monthlyDailyAmount: 500,
+    monthlyRates: [],
+    paymentMethod: "CASH",
+    paymentDate: "2026-09-09",
+    clientRequestId: "e7b93ddd-11ca-4f37-a08b-9714bd036068",
+  });
+
+  assert.equal(parsed.success, true);
+  assert.deepEqual(calculateContributionAllocation(500, 0, 500), {
+    fullSlots: 1,
+    creditBalance: 0,
+  });
+});
+
+test("partial payout can select February while leaving January unpaid", () => {
+  const months = buildPayoutMonthOptions({
+    allocations: [
+      { id: "jan-1", coverageDate: new Date("2026-01-10T00:00:00.000Z"), amount: 500 },
+      { id: "jan-2", coverageDate: new Date("2026-01-11T00:00:00.000Z"), amount: 500 },
+      { id: "feb-1", coverageDate: new Date("2026-02-01T00:00:00.000Z"), amount: 1000 },
+      { id: "feb-2", coverageDate: new Date("2026-02-02T00:00:00.000Z"), amount: 1000 },
+    ],
+    rates: [
+      { monthStart: new Date("2026-01-01T00:00:00.000Z"), dailyAmount: 500 },
+      { monthStart: new Date("2026-02-01T00:00:00.000Z"), dailyAmount: 1000 },
+    ],
+    planDailyAmount: 500,
+    creditBalance: 0,
+    nextCoverageDate: new Date("2026-02-03T00:00:00.000Z"),
+  });
+
+  const payout = calculatePayout({ months, mode: "PARTIAL", requestedMonths: [{ month: "2026-02", customerAmount: 1000 }], commissionDays: 1 });
+  assert.equal(payout.grossSavings, 2000);
+  assert.equal(payout.commissionAmount, 1000);
+  assert.equal(payout.customerAmount, 1000);
+  assert.equal(payout.remainingBalance, 1000);
+  assert.deepEqual(payout.breakdown.map((month) => month.key), ["2026-02"]);
+});
+
+test("payout commission is one daily rate for every selected month", () => {
+  const months = buildPayoutMonthOptions({
+    allocations: [
+      { id: "jan-1", coverageDate: new Date("2026-01-01T00:00:00.000Z"), amount: 500 },
+      { id: "jan-2", coverageDate: new Date("2026-01-02T00:00:00.000Z"), amount: 500 },
+      { id: "feb-1", coverageDate: new Date("2026-02-01T00:00:00.000Z"), amount: 1000 },
+      { id: "feb-2", coverageDate: new Date("2026-02-02T00:00:00.000Z"), amount: 1000 },
+    ],
+    rates: [
+      { monthStart: new Date("2026-01-01T00:00:00.000Z"), dailyAmount: 500 },
+      { monthStart: new Date("2026-02-01T00:00:00.000Z"), dailyAmount: 1000 },
+    ],
+    planDailyAmount: 500,
+    creditBalance: 0,
+    nextCoverageDate: new Date("2026-02-03T00:00:00.000Z"),
+  });
+
+  const payout = calculatePayout({ months, mode: "FULL", requestedMonths: [], commissionDays: 1 });
+  assert.equal(payout.commissionAmount, 1500);
+  assert.equal(payout.grossSavings, 3000);
+  assert.equal(payout.customerAmount, 1500);
+});
+
+test("an incomplete month remains eligible for explicit selection", () => {
+  const result = recordPayoutSchema.safeParse({
+    contributionPlanId: "plan-1",
+    clientRequestId: "e7b93ddd-11ca-4f37-a08b-9714bd036068",
+    mode: "PARTIAL",
+    requestedMonths: [{ month: "2026-02", customerAmount: 300 }],
+    payoutMethod: "CASH",
+    payoutDate: "2026-02-15",
+    note: "Customer requested the funded part of February.",
+  });
+  assert.equal(result.success, true);
+});
+
+test("exact partial cash-out uses one month's commission and preserves its remainder", () => {
+  const allocations = Array.from({ length: 30 }, (_, index) => ({
+    id: `sep-${index}`,
+    coverageDate: new Date(Date.UTC(2026, 8, index + 1)),
+    amount: 500,
+  }));
+  const base = {
+    allocations,
+    rates: [{ monthStart: new Date("2026-09-01T00:00:00.000Z"), dailyAmount: 500 }],
+    planDailyAmount: 500,
+    creditBalance: 0,
+    nextCoverageDate: new Date("2026-10-01T00:00:00.000Z"),
+  };
+  const first = calculatePayout({
+    months: buildPayoutMonthOptions(base), mode: "PARTIAL",
+    requestedMonths: [{ month: "2026-09", customerAmount: 3000 }], commissionDays: 1,
+  });
+  assert.equal(first.grossSavings, 3500);
+  assert.equal(first.commissionAmount, 500);
+  assert.equal(first.remainingBalance, 11500);
+
+  const remaining = buildPayoutMonthOptions({
+    ...base,
+    priorPayoutMonths: [{ monthStart: new Date("2026-09-01T00:00:00.000Z"), grossSavings: 3500, creditAmount: 0, commissionAmount: 500 }],
+  });
+  assert.equal(remaining[0].grossSavings, 11500);
+  const second = calculatePayout({ months: remaining, mode: "FULL", requestedMonths: [], commissionDays: 1 });
+  assert.equal(second.commissionAmount, 0);
+  assert.equal(second.customerAmount, 11500);
+});
+
+test("partial cash-out from two months charges each different rate separately", () => {
+  const months = buildPayoutMonthOptions({
+    allocations: [
+      { id: "jan-1", coverageDate: new Date("2026-01-01T00:00:00.000Z"), amount: 500 },
+      { id: "jan-2", coverageDate: new Date("2026-01-02T00:00:00.000Z"), amount: 500 },
+      { id: "feb-1", coverageDate: new Date("2026-02-01T00:00:00.000Z"), amount: 1000 },
+      { id: "feb-2", coverageDate: new Date("2026-02-02T00:00:00.000Z"), amount: 1000 },
+    ],
+    rates: [
+      { monthStart: new Date("2026-01-01T00:00:00.000Z"), dailyAmount: 500 },
+      { monthStart: new Date("2026-02-01T00:00:00.000Z"), dailyAmount: 1000 },
+    ],
+    planDailyAmount: 500, creditBalance: 0,
+    nextCoverageDate: new Date("2026-02-03T00:00:00.000Z"),
+  });
+  const payout = calculatePayout({ months, mode: "PARTIAL", commissionDays: 1,
+    requestedMonths: [{ month: "2026-01", customerAmount: 250 }, { month: "2026-02", customerAmount: 500 }],
+  });
+  assert.equal(payout.commissionAmount, 1500);
+  assert.equal(payout.customerAmount, 750);
+  assert.equal(payout.remainingBalance, 750);
+});
+
+test("Quick Pay identifies every new month whose rate must be confirmed", () => {
+  const endsExactlyAtMonthBoundary = previewRequiredMonthlyRates({
+    nextCoverageDate: new Date("2026-01-31T00:00:00.000Z"),
+    availableAmount: 500,
+    fallbackDailyAmount: 500,
+    knownRates: [{ month: "2026-01", dailyAmount: 500, locked: true }],
+  });
+  assert.deepEqual(endsExactlyAtMonthBoundary, []);
+
+  const required = previewRequiredMonthlyRates({
+    nextCoverageDate: new Date("2026-01-30T00:00:00.000Z"),
+    availableAmount: 3000,
+    fallbackDailyAmount: 500,
+    knownRates: [{ month: "2026-01", dailyAmount: 500, locked: true }],
+  });
+
+  assert.deepEqual(required, [{ month: "2026-02", dailyAmount: 500 }]);
+  const changed = previewRequiredMonthlyRates({
+    nextCoverageDate: new Date("2026-01-30T00:00:00.000Z"),
+    availableAmount: 3000,
+    fallbackDailyAmount: 500,
+    knownRates: [{ month: "2026-01", dailyAmount: 500, locked: true }],
+    choices: [{ month: "2026-02", dailyAmount: 1000 }],
+  });
+  assert.deepEqual(changed, [{ month: "2026-02", dailyAmount: 1000 }]);
+
+  const temporarilyCleared = previewRequiredMonthlyRates({
+    nextCoverageDate: new Date("2026-01-30T00:00:00.000Z"),
+    availableAmount: 3000,
+    fallbackDailyAmount: 500,
+    knownRates: [{ month: "2026-01", dailyAmount: 500, locked: true }],
+    choices: [{ month: "2026-02", dailyAmount: 0 }],
+  });
+  assert.deepEqual(temporarilyCleared, [{ month: "2026-02", dailyAmount: 500 }]);
+
+  const changedToHigherRate = previewRequiredMonthlyRates({
+    nextCoverageDate: new Date("2026-02-01T00:00:00.000Z"),
+    availableAmount: 500,
+    fallbackDailyAmount: 500,
+    knownRates: [],
+    choices: [{ month: "2026-02", dailyAmount: 1000 }],
+  });
+  assert.deepEqual(changedToHigherRate, [{ month: "2026-02", dailyAmount: 1000 }]);
+});
+
+test("correction approval requires a reason only when rejected", () => {
+  assert.equal(reviewContributionCorrectionSchema.safeParse({
+    correctionRequestId: "request-1",
+    decision: "APPROVED",
+    reviewNote: "",
+  }).success, true);
+  assert.equal(reviewContributionCorrectionSchema.safeParse({
+    correctionRequestId: "request-1",
+    decision: "REJECTED",
+    reviewNote: "",
+  }).success, false);
+});
+
+test("an approved payment correction requires a positive replacement amount", () => {
+  assert.equal(applyContributionCorrectionSchema.safeParse({
+    correctionRequestId: "request-1",
+    correctedAmount: 1000,
+    correctedPaymentMethod: "CASH",
+    correctedNote: "Corrected agent entry.",
+  }).success, true);
+  assert.equal(applyContributionCorrectionSchema.safeParse({
+    correctionRequestId: "request-1",
+    correctedAmount: 0,
+    correctedPaymentMethod: "CASH",
+  }).success, false);
 });

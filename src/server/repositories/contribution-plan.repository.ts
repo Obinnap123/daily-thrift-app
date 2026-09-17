@@ -3,11 +3,12 @@
  * ----------------------------------------------------------------------------
  * A ContributionPlan is one customer's savings cycle. Queries here are kept
  * simple and Prisma-shaped; the "how many days paid / missed / remaining,
- * is this plan actually ready for payout" business logic lives in
+ * is this plan actually eligible for payout" business logic lives in
  * contribution-plan.service.ts (findActivePlanWithProgress), not here.
  */
 import { prisma } from "@/lib/prisma";
 import { toDateOnly } from "@/lib/date";
+import { buildPayoutMonthOptions } from "@/lib/payout-selection";
 
 /** The customer's current ACTIVE plan, if any — a customer has at most one. */
 export async function findActivePlanForCustomer(customerProfileId: string) {
@@ -31,7 +32,7 @@ export async function listActivePlansForAgent(agentId: string, date: Date) {
         include: { user: { select: { id: true, name: true, phone: true, isActive: true } } },
       },
       contributions: {
-        where: { collectionDate: toDateOnly(date), isOverride: false },
+        where: { collectionDate: toDateOnly(date) },
         orderBy: { createdAt: "desc" },
       },
       allocations: {
@@ -51,7 +52,7 @@ export async function listPlansForCustomer(customerProfileId: string) {
   return prisma.contributionPlan.findMany({
     where: { customerProfileId },
     orderBy: { createdAt: "desc" },
-    include: { payout: true },
+    include: { payouts: { orderBy: { payoutDate: "desc" } } },
   });
 }
 
@@ -67,19 +68,17 @@ export async function findPlanById(contributionPlanId: string) {
 }
 
 /**
- * List plans that have reached COMPLETED (all required days paid) and have
- * no payout yet — this is exactly "customers ready for payout". Optionally
- * scoped to a single agent's customers (for an Agent's own view, if ever
- * needed) or filtered by a search string.
+ * List active plans with enough unpaid funded days to request either a
+ * partial or full payout. Optionally scoped to one agent's customers or
+ * filtered by a search string.
  */
 export async function listPlansReadyForPayout(options?: {
   agentId?: string;
   search?: string;
 }) {
-  const plans = await prisma.contributionPlan.findMany({
+  const [plans, settings] = await Promise.all([prisma.contributionPlan.findMany({
     where: {
       status: "ACTIVE",
-      payout: null,
       ...(options?.agentId ? { customerProfile: { assignedAgentId: options.agentId } } : {}),
       ...(options?.search
         ? {
@@ -96,10 +95,29 @@ export async function listPlansReadyForPayout(options?: {
       customerProfile: {
         include: { user: { select: { id: true, name: true, phone: true } } },
       },
-      _count: { select: { allocations: true } },
-      contributions: { where: { status: "COLLECTED" }, select: { amount: true } },
+      allocations: {
+        orderBy: { coverageDate: "asc" },
+        select: { id: true, coverageDate: true, amount: true },
+      },
+      payouts: { select: { months: { select: { monthStart: true, grossSavings: true, creditAmount: true, commissionAmount: true } } } },
+      monthlyRates: { orderBy: { monthStart: "asc" } },
     },
     orderBy: { updatedAt: "asc" },
-  });
-  return plans.filter((plan) => plan._count.allocations >= 2);
+  }), prisma.businessSettings.upsert({ where: { id: "default" }, create: { id: "default" }, update: {} })]);
+
+  return plans
+    .map((plan) => ({
+      ...plan,
+      payoutMonths: buildPayoutMonthOptions({
+        allocations: plan.allocations,
+        rates: plan.monthlyRates,
+        planDailyAmount: plan.dailyAmount,
+        creditBalance: plan.creditBalance,
+        nextCoverageDate: plan.nextCoverageDate,
+        priorPayoutMonths: plan.payouts.flatMap((payout) => payout.months),
+      }),
+      commissionDays: settings.commissionDays,
+    }))
+    .filter((plan) => plan.allocations.length >= settings.minimumPayoutSlots
+      && plan.payoutMonths.some((month) => month.grossSavings > (month.commissionCharged ? 0 : month.dailyAmount * settings.commissionDays)));
 }

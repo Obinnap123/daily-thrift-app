@@ -49,6 +49,7 @@ const CONTRIBUTION_COLUMNS: ReportColumn[] = [
   { key: "agent", label: "Agent" },
   { key: "status", label: "Status" },
   { key: "amount", label: "Amount (₦)" },
+  { key: "note", label: "Note" },
 ];
 
 const PAYOUT_COLUMNS: ReportColumn[] = [
@@ -58,6 +59,7 @@ const PAYOUT_COLUMNS: ReportColumn[] = [
   { key: "method", label: "Method" },
   { key: "payoutDate", label: "Payout Date" },
   { key: "approvedBy", label: "Approved By" },
+  { key: "note", label: "Note" },
 ];
 
 function parseAnchorDate(dateParam?: string): Date {
@@ -119,6 +121,7 @@ async function buildContributionReport(params: ReportParams): Promise<ReportTabl
     agent: contribution.collectedBy.name,
     status: contribution.status,
     amount: contribution.status === "COLLECTED" ? Number(contribution.amount ?? 0).toLocaleString() : "—",
+    note: contribution.note || "—",
   }));
 
   const totalCollected = contributions
@@ -152,6 +155,7 @@ async function buildContributionReport(params: ReportParams): Promise<ReportTabl
       agent: "",
       status: "Total Collected",
       amount: totalCollected.toLocaleString(),
+      note: "",
     },
   };
 }
@@ -174,6 +178,7 @@ async function buildPayoutReport(params: ReportParams): Promise<ReportTable> {
     method: payout.payoutMethod === "CASH" ? "Cash" : "Bank Transfer",
     payoutDate: format(payout.payoutDate, "dd MMM yyyy"),
     approvedBy: payout.approvedBy.name,
+    note: payout.note || "—",
   }));
 
   const totalPaidOut = payouts.reduce((sum, p) => sum + Number(p.totalSavings), 0);
@@ -192,6 +197,7 @@ async function buildPayoutReport(params: ReportParams): Promise<ReportTable> {
       method: "Total Paid Out",
       payoutDate: "",
       approvedBy: "",
+      note: "",
     },
   };
 }

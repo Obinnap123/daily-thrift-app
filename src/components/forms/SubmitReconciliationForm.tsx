@@ -6,7 +6,7 @@
  * Contribution rows) — the agent only enters what they actually counted.
  */
 import { useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import type { z } from "zod";
@@ -28,7 +28,7 @@ export function SubmitReconciliationForm({ expectedCash }: SubmitReconciliationF
   const {
     register,
     handleSubmit,
-    watch,
+    control,
     formState: { errors, isSubmitting },
   } = useForm<
     z.input<typeof submitReconciliationSchema>,
@@ -39,7 +39,7 @@ export function SubmitReconciliationForm({ expectedCash }: SubmitReconciliationF
     defaultValues: { actualCash: expectedCash },
   });
 
-  const actualCash = Number(watch("actualCash") || 0);
+  const actualCash = Number(useWatch({ control, name: "actualCash" }) || 0);
   const discrepancy = actualCash - expectedCash;
 
   async function onSubmit(data: SubmitReconciliationInput) {

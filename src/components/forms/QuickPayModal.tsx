@@ -9,10 +9,8 @@
  *  1. Pick a customer (search-select, scoped to `customers` prop — an
  *     Agent only ever receives their own customers from the caller).
  *  2. On selection, fetch that customer's active plan (daily amount, and
- *     whether today already has a normal payment recorded) via
- *     getCustomerPlanForQuickPayAction — pre-fills Amount and, for a
- *     duplicate day, shows a warning (Agent) or an override checkbox+
- *     reason field (Admin only).
+ *     today's payment count) via getCustomerPlanForQuickPayAction. Another
+ *     payment on the same day asks either role for explicit confirmation.
  *  3. Submit via recordQuickPayAction. On success: toast, show an in-modal
  *     success confirmation (receipt number + a link to the printable
  *     receipt), and refresh dashboard stats via router.refresh() (a Server
@@ -22,7 +20,7 @@
  *     close the modal).
  */
 import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import type { z } from "zod";
@@ -39,6 +37,7 @@ import { Button } from "@/components/ui/Button";
 import { CustomerSearchSelect, type CustomerSearchOption } from "@/components/forms/CustomerSearchSelect";
 import { useToast } from "@/components/providers/ToastProvider";
 import { format } from "date-fns";
+import { previewRequiredMonthlyRates } from "@/lib/monthly-rate-preview";
 
 interface QuickPayModalProps {
   isOpen: boolean;
@@ -55,6 +54,9 @@ interface PlanInfo {
   dailyAmount: number;
   durationDays: number;
   startsNewPeriod: boolean;
+  nextCoverageDate: string;
+  creditBalance: number;
+  monthlyRates: { month: string; dailyAmount: number; locked: boolean }[];
 }
 
 export function QuickPayModal({
@@ -70,16 +72,19 @@ export function QuickPayModal({
   const [formError, setFormError] = useState<string | null>(null);
   const [planInfo, setPlanInfo] = useState<PlanInfo | null>(null);
   const [noActivePlan, setNoActivePlan] = useState(false);
-  const [alreadyPaidToday, setAlreadyPaidToday] = useState(false);
+  const [paymentsToday, setPaymentsToday] = useState(0);
+  const [requiresAdditionalConfirmation, setRequiresAdditionalConfirmation] = useState(false);
+  const [requestId] = useState(() => crypto.randomUUID());
   const [isLoadingPlan, setIsLoadingPlan] = useState(false);
   const [successReceiptNumber, setSuccessReceiptNumber] = useState<string | null>(null);
+  const [additionalRateChoices, setAdditionalRateChoices] = useState<Record<string, number | "">>({});
+  const [monthlyRateErrors, setMonthlyRateErrors] = useState<Record<string, string>>({});
 
   const {
     register,
     handleSubmit,
-    watch,
+    control,
     setValue,
-    reset,
     formState: { errors, isSubmitting },
   } = useForm<z.input<typeof quickPaySchema>, unknown, QuickPayInput>({
     resolver: zodResolver(quickPaySchema),
@@ -87,43 +92,28 @@ export function QuickPayModal({
       customerProfileId: initialCustomerProfileId ?? "",
       paymentMethod: "CASH",
       paymentDate: format(new Date(), "yyyy-MM-dd"),
-      isOverride: false,
+      confirmAdditionalPayment: false,
+      clientRequestId: requestId,
     },
   });
 
-  const customerProfileId = watch("customerProfileId");
-  const isOverride = watch("isOverride");
+  const customerProfileId = useWatch({ control, name: "customerProfileId" });
+  const selectedPaymentDate = useWatch({ control, name: "paymentDate" });
+  const isTodayPaymentDate = !isAdmin || selectedPaymentDate === format(new Date(), "yyyy-MM-dd");
+  const enteredAmount = Number(useWatch({ control, name: "amount" }) ?? 0);
+  const enteredCurrentRate = Number(useWatch({ control, name: "monthlyDailyAmount" }) ?? 0);
 
-  // Reset everything whenever the modal is (re)opened, and pre-select a
-  // customer if one was passed in (e.g. from a Customer Tracking page).
-  useEffect(() => {
-    if (isOpen) {
-      reset({
-        customerProfileId: initialCustomerProfileId ?? "",
-        paymentMethod: "CASH",
-        paymentDate: format(new Date(), "yyyy-MM-dd"),
-        isOverride: false,
-        amount: undefined,
-        note: "",
-        overrideReason: "",
-      });
-      setFormError(null);
-      setPlanInfo(null);
-      setNoActivePlan(false);
-      setAlreadyPaidToday(false);
-      setSuccessReceiptNumber(null);
-      if (initialCustomerProfileId) {
-        void loadPlan(initialCustomerProfileId);
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, initialCustomerProfileId]);
-
+  // The parent mounts a fresh modal for every opening. Only the optional
+  // pre-selected customer's plan needs to be loaded after mount.
   async function loadPlan(id: string) {
     setIsLoadingPlan(true);
     setPlanInfo(null);
     setNoActivePlan(false);
-    setAlreadyPaidToday(false);
+    setPaymentsToday(0);
+    setRequiresAdditionalConfirmation(false);
+    setValue("confirmAdditionalPayment", false);
+    setAdditionalRateChoices({});
+    setMonthlyRateErrors({});
 
     const result = await getCustomerPlanForQuickPayAction(id);
     setIsLoadingPlan(false);
@@ -140,10 +130,21 @@ export function QuickPayModal({
       dailyAmount: result.data.plan.dailyAmount,
       durationDays: result.data.plan.durationDays,
       startsNewPeriod: result.data.startsNewPeriod,
+      nextCoverageDate: result.data.plan.nextCoverageDate,
+      creditBalance: result.data.plan.creditBalance,
+      monthlyRates: result.data.plan.monthlyRates,
     });
-    setAlreadyPaidToday(result.data.alreadyPaidToday);
+    setPaymentsToday(result.data.paymentsToday);
     setValue("amount", result.data.plan.dailyAmount);
+    setValue("monthlyDailyAmount", result.data.plan.dailyAmount);
   }
+
+  useEffect(() => {
+    if (initialCustomerProfileId) {
+      void Promise.resolve().then(() => loadPlan(initialCustomerProfileId));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialCustomerProfileId]);
 
   function handleCustomerChange(id: string) {
     setValue("customerProfileId", id, { shouldValidate: true });
@@ -154,9 +155,37 @@ export function QuickPayModal({
   async function onSubmit(data: QuickPayInput) {
     setFormError(null);
 
+    const submittedMonthlyRates = requiredAdditionalRates.map((rate) => ({
+      month: rate.month,
+      dailyAmount: additionalRateChoices[rate.month] ?? rate.dailyAmount,
+    }));
+    const invalidMonthlyRates = submittedMonthlyRates.filter(
+      (rate) =>
+        rate.dailyAmount === "" ||
+        !Number.isFinite(rate.dailyAmount) ||
+        Number(rate.dailyAmount) <= 0,
+    );
+    if (invalidMonthlyRates.length > 0) {
+      setMonthlyRateErrors(
+        Object.fromEntries(
+          invalidMonthlyRates.map((rate) => [rate.month, "Enter a daily rate greater than zero"]),
+        ),
+      );
+      const message = "Enter a valid daily rate for every month shown below.";
+      setFormError(message);
+      showToast({ type: "error", message });
+      return;
+    }
+
     let result: Awaited<ReturnType<typeof recordQuickPayAction>>;
     try {
-      result = await recordQuickPayAction(data);
+      result = await recordQuickPayAction({
+        ...data,
+        monthlyRates: submittedMonthlyRates.map((rate) => ({
+          month: rate.month,
+          dailyAmount: Number(rate.dailyAmount),
+        })),
+      });
     } catch {
       const message =
         "Payment could not be recorded. No money was added. Please check your connection and try again.";
@@ -168,6 +197,9 @@ export function QuickPayModal({
     if (!result.success) {
       setFormError(result.message);
       showToast({ type: "error", message: result.message });
+      if (result.message.includes("already recorded")) {
+        setRequiresAdditionalConfirmation(true);
+      }
       return;
     }
 
@@ -184,6 +216,26 @@ export function QuickPayModal({
   }
 
   const receiptBasePath = isAdmin ? "/admin/contributions" : "/agent/contributions";
+  const currentMonth = planInfo?.nextCoverageDate.slice(0, 7) ?? "";
+  const currentMonthRate = planInfo?.monthlyRates.find((rate) => rate.month === currentMonth);
+  const requiredAdditionalRates = (() => {
+    if (!planInfo || enteredAmount <= 0 || enteredCurrentRate <= 0) return [];
+    const choices = [
+      { month: currentMonth, dailyAmount: enteredCurrentRate },
+      ...Object.entries(additionalRateChoices)
+        .filter((choice): choice is [string, number] =>
+          typeof choice[1] === "number" && Number.isFinite(choice[1]) && choice[1] > 0,
+        )
+        .map(([month, dailyAmount]) => ({ month, dailyAmount })),
+    ];
+    return previewRequiredMonthlyRates({
+      nextCoverageDate: new Date(planInfo.nextCoverageDate),
+      availableAmount: planInfo.creditBalance + enteredAmount,
+      fallbackDailyAmount: enteredCurrentRate,
+      knownRates: planInfo.monthlyRates,
+      choices,
+    }).filter((rate) => rate.month !== currentMonth);
+  })();
 
   if (successReceiptNumber) {
     return (
@@ -259,50 +311,96 @@ export function QuickPayModal({
                 This payment will automatically open the customer&apos;s next savings period.
               </p>
             )}
+            <p className="mt-2 text-xs text-ink-muted">
+              Payments are allocated using the saved daily rate for each calendar month.
+            </p>
           </div>
         )}
 
-        {alreadyPaidToday && !isAdmin && (
-          <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
-            A payment has already been recorded for this customer today. Only an Admin can
-            override this.
-          </p>
+        {planInfo && (
+          <Input
+            label={`Daily rate for ${format(new Date(`${currentMonth}-01T00:00:00.000Z`), "MMMM yyyy")}`}
+            type="number"
+            step="0.01"
+            min="0"
+            disabled={currentMonthRate?.locked}
+            className={currentMonthRate?.locked ? "cursor-not-allowed bg-surface-muted text-ink-muted" : undefined}
+            error={errors.monthlyDailyAmount?.message}
+            {...register("monthlyDailyAmount")}
+          />
+        )}
+        {currentMonthRate?.locked && (
+          <p className="-mt-2 text-xs text-ink-muted">This month already has funded days, so its agreed rate is locked.</p>
+        )}
+        {requiredAdditionalRates.length > 0 && (
+          <fieldset className="space-y-3 rounded-xl border border-line bg-surface-muted p-3">
+            <legend className="px-1 text-sm font-semibold text-ink">Confirm rates for the next month(s)</legend>
+            <p className="text-xs text-ink-muted">
+              This payment reaches another calendar month. Enter that month&apos;s agreed daily contribution rate. You can keep the suggested rate or replace it.
+            </p>
+            {requiredAdditionalRates.map((rate) => (
+              <Input
+                key={rate.month}
+                label={`Daily rate for ${format(new Date(`${rate.month}-01T00:00:00.000Z`), "MMMM yyyy")}`}
+                type="number"
+                step="0.01"
+                min="0"
+                value={additionalRateChoices[rate.month] ?? rate.dailyAmount}
+                error={monthlyRateErrors[rate.month]}
+                onChange={(event) => {
+                  const nextValue = event.target.value;
+                  setAdditionalRateChoices((current) => ({
+                    ...current,
+                    [rate.month]: nextValue === "" ? "" : Number(nextValue),
+                  }));
+                  setMonthlyRateErrors((current) => {
+                    if (!current[rate.month]) return current;
+                    const next = { ...current };
+                    delete next[rate.month];
+                    return next;
+                  });
+                  setFormError(null);
+                }}
+              />
+            ))}
+          </fieldset>
         )}
 
-        {alreadyPaidToday && isAdmin && (
-          <div className="rounded-md bg-amber-50 px-3 py-3 text-sm text-amber-800">
-            <p className="mb-2">
-              A payment has already been recorded for this customer today. Check the box below to
-              record this as a genuine additional payment (override).
+        {((isTodayPaymentDate && paymentsToday > 0) || requiresAdditionalConfirmation) && (
+          <div className="rounded-xl border border-warning/30 bg-warning-soft px-3 py-3 text-sm text-ink">
+            <p className="mb-2 font-medium">
+              {isTodayPaymentDate && paymentsToday > 0
+                ? `${paymentsToday} ${paymentsToday === 1 ? "payment has" : "payments have"} already been recorded for this customer today.`
+                : "A payment has already been recorded for this customer on the selected date."}
             </p>
             <label className="flex items-center gap-2">
               <input
                 type="checkbox"
-                className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
-                {...register("isOverride")}
+                className="h-5 w-5 rounded border-line-strong text-brand focus:ring-brand"
+                {...register("confirmAdditionalPayment")}
               />
-              <span className="font-medium">Override duplicate-payment check</span>
+              <span>Yes, this is another payment received from the customer.</span>
             </label>
           </div>
         )}
 
-        {isOverride && (
-          <Input
-            label="Reason for override"
-            placeholder="e.g. Customer is catching up a previously missed day"
-            error={errors.overrideReason?.message}
-            {...register("overrideReason")}
-          />
-        )}
-
         <Input
-          label="Amount"
+          label="Payment amount collected"
           type="number"
           step="0.01"
           min="0"
           error={errors.amount?.message}
           {...register("amount")}
         />
+        {planInfo && enteredAmount > 0 && enteredCurrentRate > 0 && (
+          <p className="-mt-2 text-xs text-ink-muted">
+            {enteredAmount < enteredCurrentRate
+              ? `₦${enteredAmount.toLocaleString()} will remain as credit toward the next funded day.`
+              : enteredAmount === enteredCurrentRate
+                ? `₦${enteredAmount.toLocaleString()} funds one day at ₦${enteredCurrentRate.toLocaleString()}/day.`
+                : "The payment will fund the oldest unpaid days first; any amount below the next full daily rate remains as credit."}
+          </p>
+        )}
 
         <Select label="Payment method" error={errors.paymentMethod?.message} {...register("paymentMethod")}>
           <option value="CASH">Cash</option>
@@ -341,7 +439,7 @@ export function QuickPayModal({
         <Button
           type="submit"
           isLoading={isSubmitting}
-          disabled={noActivePlan || (alreadyPaidToday && !isAdmin) || !customerProfileId}
+          disabled={noActivePlan || !customerProfileId}
           className="w-full"
         >
           Process Payment

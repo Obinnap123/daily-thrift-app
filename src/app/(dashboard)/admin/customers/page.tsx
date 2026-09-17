@@ -1,6 +1,6 @@
 /**
  * Admin > Customers list.
- * Mirrors the Agents list page pattern: search (name/phone/ID number/
+ * Mirrors the Agents list page pattern: search (name/phone/customer number/
  * customer code), active/inactive status filter, and pagination — all
  * applied server-side via listCustomersPaginated().
  */
@@ -58,7 +58,7 @@ export default async function AdminCustomersPage({ searchParams }: AdminCustomer
         </div>
 
         <SearchFilterBar
-          placeholder="Search by name, phone, ID number, or code…"
+          placeholder="Search by name, phone, customer number, or code…"
           statusOptions={[
             { value: "active", label: "Active" },
             { value: "inactive", label: "Inactive" },
@@ -79,7 +79,7 @@ export default async function AdminCustomersPage({ searchParams }: AdminCustomer
                   <th className="px-4 py-3 font-medium">Code</th>
                   <th className="px-4 py-3 font-medium">Name</th>
                   <th className="px-4 py-3 font-medium">Phone</th>
-                  <th className="px-4 py-3 font-medium">ID Number</th>
+                  <th className="px-4 py-3 font-medium">Customer No.</th>
                   <th className="px-4 py-3 font-medium">Assigned Agent</th>
                   <th className="px-4 py-3 font-medium">Status</th>
                   <th className="px-4 py-3 font-medium"></th>
@@ -95,7 +95,7 @@ export default async function AdminCustomersPage({ searchParams }: AdminCustomer
                       {customer.user.name}
                     </td>
                     <td className="px-4 py-3 text-gray-600">{customer.user.phone}</td>
-                    <td className="px-4 py-3 text-gray-600">{customer.idNumber}</td>
+                    <td className="px-4 py-3 text-gray-600">{customer.customerNumber}</td>
                     <td className="px-4 py-3 text-gray-600">{customer.assignedAgent.name}</td>
                     <td className="px-4 py-3">
                       <Badge tone={customer.user.isActive ? "green" : "red"}>

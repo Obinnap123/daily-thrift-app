@@ -20,6 +20,7 @@ import { listPayoutsForCustomer } from "@/server/repositories/payout.repository"
 import { listContributionsForCustomer } from "@/server/repositories/contribution.repository";
 import { countCustomerFinancialActivity } from "@/server/repositories/customer.repository";
 import { format } from "date-fns";
+import Link from "next/link";
 
 const ADMIN_NAV_LINKS = [
   { href: "/admin", label: "Overview" },
@@ -82,7 +83,7 @@ export default async function AdminCustomerDetailPage({
             </h3>
             <dl className="space-y-3 text-sm">
               <Row label="Customer code" value={customer.customerCode} />
-              <Row label="ID number" value={customer.idNumber} />
+              <Row label="Customer No." value={customer.customerNumber} />
               <Row
                 label="Registered"
                 value={format(customer.createdAt, "dd MMM yyyy, h:mm a")}
@@ -101,7 +102,7 @@ export default async function AdminCustomerDetailPage({
                 id: customer.id,
                 fullName: customer.user.name,
                 phone: customer.user.phone,
-                idNumber: customer.idNumber,
+                customerNumber: customer.customerNumber,
               }}
             />
           </Card>
@@ -148,7 +149,7 @@ export default async function AdminCustomerDetailPage({
                       ₦{Number(payout.totalSavings).toLocaleString()} · {payout.payoutMethod === "CASH" ? "Cash" : "Bank Transfer"}
                     </p>
                     <p className="text-xs text-gray-500">
-                      {format(payout.payoutDate, "dd MMM yyyy")} · Receipt {payout.receiptNumber} · approved by{" "}
+                      {format(payout.payoutDate, "dd MMM yyyy")} · Receipt <Link href={`/admin/payouts/${encodeURIComponent(payout.receiptNumber)}`} className="font-medium text-brand underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand" aria-label={`View or print payout receipt ${payout.receiptNumber}`}>{payout.receiptNumber}</Link> · approved by{" "}
                       {payout.approvedBy.name}
                     </p>
                   </li>

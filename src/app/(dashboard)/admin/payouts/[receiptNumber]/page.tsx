@@ -57,6 +57,8 @@ export default async function PayoutReceiptPage({
               <Row label="Gross Savings" value={`₦${Number(payout.grossSavings).toLocaleString()}`} />
               <Row label="Company Commission" value={`₦${Number(payout.commissionAmount).toLocaleString()}`} />
               <Row label="Customer Received" value={`₦${Number(payout.customerAmount).toLocaleString()}`} />
+              <Row label="Payout Type" value={payout.scope === "PARTIAL" ? "Partial payout" : "Full payout"} />
+              <Row label="Remaining Saved Balance" value={`₦${Number(payout.remainingBalance).toLocaleString()}`} />
               <Row
                 label="Payout Method"
                 value={payout.payoutMethod === "CASH" ? "Cash" : "Bank Transfer"}
@@ -65,6 +67,8 @@ export default async function PayoutReceiptPage({
               <Row label="Processed By" value={payout.approvedBy.name} />
               {payout.note && <Row label="Note" value={payout.note} />}
             </dl>
+
+            {payout.months.length > 0 && <div className="mt-5 border-t border-dashed border-gray-300 pt-4"><h2 className="mb-2 text-sm font-semibold text-gray-900">Months included</h2><ul className="space-y-2 text-sm">{payout.months.map((month) => <li key={month.id} className="flex flex-wrap justify-between gap-2 border-b border-gray-200 py-2"><span>{format(month.monthStart, "MMMM yyyy")}</span><span className="text-right font-medium">₦{Number(month.customerAmount).toLocaleString()} to customer · ₦{Number(month.commissionAmount).toLocaleString()} commission</span></li>)}</ul></div>}
 
             <p className="mt-6 border-t border-dashed border-gray-300 pt-4 text-center text-xs text-gray-400">
               This receipt confirms a payout made manually (cash or bank transfer) outside this

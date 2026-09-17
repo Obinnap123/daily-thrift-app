@@ -15,6 +15,7 @@
  */
 import "server-only";
 import { prisma } from "@/lib/prisma";
+import { resolvePlanDailyRate } from "@/lib/plan-daily-rate";
 import { toDateOnly, today } from "@/lib/date";
 import {
   createContributionPlanSchema,
@@ -108,6 +109,12 @@ export async function createContributionPlan(
         startDate: start,
         expectedMaturityDate,
         nextCoverageDate: start,
+        monthlyRates: {
+          create: {
+            monthStart: new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1)),
+            dailyAmount,
+          },
+        },
       },
     });
   } catch (error) {
@@ -139,16 +146,36 @@ export async function getActivePlanWithProgress(customerProfileId: string) {
   const plan = await prisma.contributionPlan.findFirst({
     where: { customerProfileId, status: "ACTIVE" },
     orderBy: { createdAt: "desc" },
-    include: { contributions: true, allocations: true },
+    include: {
+      contributions: true,
+      allocations: true,
+      payouts: { select: { grossSavings: true } },
+      monthlyRates: { select: { monthStart: true, dailyAmount: true } },
+    },
   });
   if (!plan) return null;
 
   const asOf = today();
   const progress = computePlanProgress(plan, plan.contributions);
+  progress.daysPaid = plan.allocations.length;
+  progress.totalSaved = plan.contributions
+    .filter((contribution) => contribution.status === "COLLECTED")
+    .reduce((sum, contribution) => sum + Number(contribution.amount ?? 0), 0)
+    - plan.payouts.reduce((sum, payout) => sum + Number(payout.grossSavings), 0);
+  const daysInCurrentSheet = progress.daysPaid % plan.durationDays;
+  progress.daysRemaining = progress.daysPaid > 0 && daysInCurrentSheet === 0
+    ? 0
+    : Math.max(0, plan.durationDays - daysInCurrentSheet);
   progress.daysMissed = countUnfundedPastDays(
     plan.nextCoverageDate ?? plan.startDate,
     asOf,
   );
 
-  return { plan, progress, asOf };
+  const currentRate = resolvePlanDailyRate({
+    initialDailyAmount: plan.dailyAmount,
+    startDate: plan.startDate,
+    coverageDate: plan.nextCoverageDate ?? plan.startDate,
+    monthlyRates: plan.monthlyRates,
+  });
+  return { plan, progress, asOf, currentRate };
 }

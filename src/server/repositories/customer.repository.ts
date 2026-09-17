@@ -36,7 +36,7 @@ export async function listCustomerProfiles(options?: { agentId?: string }) {
 export interface ListCustomersOptions {
   /** Scope to a single agent's customers (Agent role). Omit for Admin (all). */
   agentId?: string;
-  /** Free-text search across name, phone, ID number, and customer code. */
+  /** Free-text search across name, phone, customer number, and customer code. */
   search?: string;
   /** Filter to only active or only inactive customers. Omit for "all". */
   status?: "active" | "inactive";
@@ -73,7 +73,7 @@ export async function listCustomersPaginated(options: ListCustomersOptions = {})
       ? {
           OR: [
             { customerCode: { contains: search, mode: "insensitive" } },
-            { idNumber: { contains: search, mode: "insensitive" } },
+            { customerNumber: { contains: search, mode: "insensitive" } },
             { user: { name: { contains: search, mode: "insensitive" } } },
             { user: { phone: { contains: search } } },
           ],
@@ -130,9 +130,9 @@ export async function findCustomerProfileByUserId(userId: string) {
   });
 }
 
-/** Check whether an ID number is already registered (uniqueness pre-check). */
-export async function findCustomerProfileByIdNumber(idNumber: string) {
-  return prisma.customerProfile.findUnique({ where: { idNumber } });
+/** Check whether a customer card number is already registered. */
+export async function findCustomerProfileByCustomerNumber(customerNumber: string) {
+  return prisma.customerProfile.findUnique({ where: { customerNumber } });
 }
 
 /** Fetch the raw underlying User id for a given CustomerProfile — used to
@@ -144,7 +144,7 @@ export async function findCustomerProfileWithUserId(customerProfileId: string) {
     select: {
       id: true,
       userId: true,
-      idNumber: true,
+      customerNumber: true,
       assignedAgentId: true,
       user: { select: { phone: true } },
     },

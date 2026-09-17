@@ -18,11 +18,8 @@
  *    COLLECTED payment (Quick Pay never records a MISSED day — that stays
  *    on the Today's Collections screen). Adds: an explicit payment method,
  *    an editable amount, a receipt number, and — Admin-only — the ability
- *    to override the same-day duplicate-payment check and (still
- *    Admin-only) to backdate the payment date. An Agent's request is
- *    always pinned to today() and can never set isOverride, regardless of
- *    what the client sends — re-checked here, not just trusted from the
- *    caller's Server Action authorization layer.
+ *    to backdate the payment date. Additional same-day payments are allowed
+ *    for both roles with explicit confirmation and an idempotency token.
  *
  * Both paths funnel through the same refreshPlanCompletionStatus() call
  * after creating the row, so contribution-plan.service.ts remains the one
@@ -48,7 +45,7 @@ import {
   createAuditLog,
   type AuditActorContext,
 } from "@/server/services/audit.service";
-import { calculateContributionAllocation } from "@/lib/contribution-allocation";
+import { calendarMonthKey, calendarMonthStart } from "@/lib/payout-selection";
 
 type PlanForAllocation = {
   id: string;
@@ -58,6 +55,9 @@ type PlanForAllocation = {
   nextCoverageDate: Date | null;
   creditBalance: unknown;
 };
+
+class MonthlyRateConflictError extends Error {}
+class MonthlyRateRequiredError extends Error {}
 
 async function createNextActivePlan(
   tx: Prisma.TransactionClient,
@@ -78,6 +78,12 @@ async function createNextActivePlan(
       startDate,
       expectedMaturityDate: addDaysToDate(startDate, 30),
       nextCoverageDate: startDate,
+      monthlyRates: {
+        create: {
+          monthStart: calendarMonthStart(startDate),
+          dailyAmount: previous.dailyAmount as Prisma.Decimal,
+        },
+      },
     },
   });
 }
@@ -86,37 +92,95 @@ async function allocateCollectedAmount(
   tx: Prisma.TransactionClient,
   plan: PlanForAllocation,
   contributionId: string,
-  amount: number
+  amount: number,
+  requestedMonthlyRate?: number,
+  requestedMonthlyRates: { month: string; dailyAmount: number }[] = [],
 ) {
-  const dailyAmount = Number(plan.dailyAmount);
-  const { fullSlots, creditBalance } = calculateContributionAllocation(
-    dailyAmount,
-    Number(plan.creditBalance),
-    amount,
-  );
   const firstDate = plan.nextCoverageDate ?? plan.startDate;
+  const firstMonth = calendarMonthStart(firstDate);
+  const suppliedRateByMonth = new Map(
+    requestedMonthlyRates.map((rate) => [rate.month, rate.dailyAmount]),
+  );
+  if (requestedMonthlyRate) {
+    suppliedRateByMonth.set(calendarMonthKey(firstMonth), requestedMonthlyRate);
+  }
 
-  if (fullSlots > 0) {
+  const [storedRates, allocatedDates] = await Promise.all([
+    tx.contributionMonthRate.findMany({
+      where: { contributionPlanId: plan.id },
+      orderBy: { monthStart: "asc" },
+    }),
+    tx.contributionAllocation.findMany({
+      where: { contributionPlanId: plan.id },
+      select: { coverageDate: true },
+    }),
+  ]);
+  const lockedMonths = new Set(allocatedDates.map((row) => calendarMonthKey(row.coverageDate)));
+  const rateByMonth = new Map(storedRates.map((row) => [calendarMonthKey(row.monthStart), Number(row.dailyAmount)]));
+  for (const [month, suppliedRate] of suppliedRateByMonth) {
+    const storedRate = rateByMonth.get(month);
+    if (storedRate !== undefined && storedRate !== suppliedRate) {
+      if (lockedMonths.has(month)) {
+        throw new MonthlyRateConflictError(`${month}'s daily rate is already in use and cannot be changed.`);
+      }
+      await tx.contributionMonthRate.update({
+        where: {
+          contributionPlanId_monthStart: {
+            contributionPlanId: plan.id,
+            monthStart: new Date(`${month}-01T00:00:00.000Z`),
+          },
+        },
+        data: { dailyAmount: suppliedRate },
+      });
+      rateByMonth.set(month, suppliedRate);
+    }
+  }
+
+  let inheritedRate = requestedMonthlyRate ?? rateByMonth.get(calendarMonthKey(firstDate)) ?? Number(plan.dailyAmount);
+  let available = Number(plan.creditBalance) + amount;
+  let cursor = firstDate;
+  const rows: { contributionPlanId: string; contributionId: string; coverageDate: Date; amount: number }[] = [];
+
+  // A bounded loop protects the database from an accidental enormous entry;
+  // any excess remains visible as credit and is never discarded.
+  while (rows.length < 3_660) {
+    const key = calendarMonthKey(cursor);
+    let dailyAmount = rateByMonth.get(key);
+    if (!dailyAmount) {
+      const suppliedRate = suppliedRateByMonth.get(key);
+      if (!suppliedRate) {
+        if (available < inheritedRate) break;
+        throw new MonthlyRateRequiredError(`Confirm the daily rate for ${cursor.toLocaleDateString("en-NG", { month: "long", year: "numeric", timeZone: "UTC" })} before recording this payment.`);
+      }
+      dailyAmount = suppliedRate;
+      await tx.contributionMonthRate.create({
+        data: { contributionPlanId: plan.id, monthStart: calendarMonthStart(cursor), dailyAmount },
+      });
+      rateByMonth.set(key, dailyAmount);
+    }
+    inheritedRate = dailyAmount;
+    if (available < dailyAmount) break;
+    rows.push({ contributionPlanId: plan.id, contributionId, coverageDate: cursor, amount: dailyAmount });
+    available -= dailyAmount;
+    cursor = addDaysToDate(cursor, 1);
+  }
+
+  if (rows.length > 0) {
     await tx.contributionAllocation.createMany({
-      data: Array.from({ length: fullSlots }, (_, index) => ({
-        contributionPlanId: plan.id,
-        contributionId,
-        coverageDate: addDaysToDate(firstDate, index),
-        amount: dailyAmount,
-      })),
+      data: rows,
     });
   }
 
   await tx.contributionPlan.update({
     where: { id: plan.id },
     data: {
-      creditBalance,
-      nextCoverageDate: addDaysToDate(firstDate, fullSlots),
+      creditBalance: available,
+      nextCoverageDate: cursor,
       status: "ACTIVE",
     },
   });
 
-  return { fullSlots, creditBalance };
+  return { fullSlots: rows.length, creditBalance: available };
 }
 
 export async function recordContribution(
@@ -129,7 +193,7 @@ export async function recordContribution(
     return fail("Please correct the highlighted fields.");
   }
 
-  const { customerProfileId, status, amount, note } = parsed.data;
+  const { customerProfileId, status, amount, monthlyDailyAmount, note } = parsed.data;
 
   const collectionDate = today();
   // Draw the receipt number BEFORE the transaction — nextval() on a
@@ -186,7 +250,7 @@ export async function recordContribution(
       }
 
       const alreadyRecorded = await tx.contribution.findFirst({
-        where: { contributionPlanId: plan.id, collectionDate, isOverride: false },
+        where: { contributionPlanId: plan.id, collectionDate },
         select: { id: true },
       });
       if (alreadyRecorded) {
@@ -209,7 +273,7 @@ export async function recordContribution(
         },
       });
       if (status === "COLLECTED") {
-        await allocateCollectedAmount(tx, plan, created.id, Number(amount));
+        await allocateCollectedAmount(tx, plan, created.id, Number(amount), monthlyDailyAmount);
       }
       await createAuditLog(tx, {
         actorId: audit.actorId,
@@ -232,6 +296,7 @@ export async function recordContribution(
     if (!result.success) return fail(result.error);
     return ok({ contributionId: result.contributionId });
   } catch (error) {
+    if (error instanceof MonthlyRateConflictError || error instanceof MonthlyRateRequiredError) return fail(error.message);
     if (isUniqueConstraintConflict(error)) {
       return fail("Today's collection has already been recorded for this customer.");
     }
@@ -245,8 +310,7 @@ export async function recordContribution(
  * @param actorIsAdmin Re-verified by the caller (Server Action) from the
  *   session, then passed in here — this function does NOT call
  *   requireRole() itself (that's the Server Action's job), but it DOES
- *   gate every Admin-only capability (override, backdating) on this flag
- *   rather than trusting `input.isOverride` / `input.paymentDate` blindly.
+ *   gate Admin-only backdating on this flag rather than trusting the client.
  */
 export async function recordQuickPay(
   input: QuickPayInput,
@@ -259,18 +323,13 @@ export async function recordQuickPay(
     return fail("Please correct the highlighted fields.");
   }
 
-  const { customerProfileId, amount, paymentMethod, note } = parsed.data;
+  const { customerProfileId, amount, monthlyDailyAmount, monthlyRates, paymentMethod, note, confirmAdditionalPayment } = parsed.data;
+  const clientRequestId = parsed.data.clientRequestId;
 
-  // Admin-only capabilities: backdating the payment date, and overriding
-  // the duplicate-payment check. An Agent's request is pinned back to
-  // today() / isOverride = false here, regardless of what was submitted —
-  // never trust the client (or even the Server Action layer alone) for a
-  // privilege this sensitive.
+  // Only Admins can backdate. Agents are pinned to the server's business date.
   const collectionDate = actorIsAdmin && parsed.data.paymentDate
     ? toDateOnly(parsed.data.paymentDate)
     : today();
-  const isOverride = actorIsAdmin ? parsed.data.isOverride : false;
-  const overrideReason = isOverride ? parsed.data.overrideReason || null : null;
   if (collectionDate > today()) return fail("A payment cannot be dated in the future.");
 
   // Draw the receipt number BEFORE the transaction — nextval() on a
@@ -280,6 +339,24 @@ export async function recordQuickPay(
   try {
     const result = await runFinancialTransaction(async (tx) => {
       await lockCustomerFinancialState(tx, customerProfileId);
+      const previousRequest = await tx.contribution.findUnique({ where: { clientRequestId } });
+      if (previousRequest) {
+        if (
+          previousRequest.customerProfileId !== customerProfileId ||
+          previousRequest.collectedById !== collectedById ||
+          Number(previousRequest.amount) !== amount ||
+          previousRequest.collectionDate.getTime() !== collectionDate.getTime()
+        ) {
+          return { success: false as const, error: "This payment request was already used. Reopen Quick Pay to record a new payment." };
+        }
+        return { success: true as const, contribution: previousRequest, allocation: null, replayed: true as const };
+      }
+      const paymentsToday = await tx.contribution.count({
+        where: { customerProfileId, collectionDate, status: "COLLECTED" },
+      });
+      if (paymentsToday > 0 && !confirmAdditionalPayment) {
+        return { success: false as const, error: "A payment is already recorded for this customer on this date. Confirm that this is another payment, then try again." };
+      }
       let plan = await tx.contributionPlan.findFirst({
         where: { customerProfileId, status: "ACTIVE" },
         orderBy: { createdAt: "desc" },
@@ -309,12 +386,17 @@ export async function recordQuickPay(
           note: note || null,
           paymentMethod,
           receiptNumber,
-          isOverride,
-          overriddenById: isOverride ? collectedById : null,
-          overrideReason,
+          clientRequestId,
         },
       });
-      const allocation = await allocateCollectedAmount(tx, plan, created.id, amount);
+      const allocation = await allocateCollectedAmount(
+        tx,
+        plan,
+        created.id,
+        amount,
+        monthlyDailyAmount,
+        monthlyRates,
+      );
       await createAuditLog(tx, {
         actorId: audit.actorId,
         actorRole: audit.actorRole,
@@ -329,22 +411,23 @@ export async function recordQuickPay(
           receiptNumber,
           paymentMethod,
           collectionDate: collectionDate.toISOString().slice(0, 10),
-          isOverride,
+          additionalPaymentOnDate: paymentsToday > 0,
         },
       }, audit);
-      return { success: true as const, contribution: created, allocation };
+      return { success: true as const, contribution: created, allocation, replayed: false as const };
     });
     if (!result.success) return fail(result.error);
 
     return ok({
       contributionId: result.contribution.id,
-      receiptNumber,
-      slotsFunded: result.allocation.fullSlots,
-      creditBalance: result.allocation.creditBalance,
+      receiptNumber: result.contribution.receiptNumber!,
+      slotsFunded: result.allocation?.fullSlots ?? 0,
+      creditBalance: result.allocation?.creditBalance ?? 0,
     });
   } catch (error) {
+    if (error instanceof MonthlyRateConflictError || error instanceof MonthlyRateRequiredError) return fail(error.message);
     if (isUniqueConstraintConflict(error)) {
-      return fail("A payment has already been recorded for this customer today. An Admin may use an override when appropriate.");
+      return fail("This payment request was already processed. Reopen Quick Pay to check its receipt before trying again.");
     }
     throw error;
   }

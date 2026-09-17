@@ -77,7 +77,7 @@ export default async function AgentCustomerDetailPage({
           <dl className="grid min-w-0 grid-cols-1 gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
             <Row label="Customer code" value={customer.customerCode} />
             <Row label="Phone" value={customer.user.phone ?? "—"} />
-            <Row label="ID number" value={customer.idNumber} />
+            <Row label="Customer No." value={customer.customerNumber} />
             <Row label="Registered" value={format(customer.createdAt, "dd MMM yyyy")} />
           </dl>
         </Card>

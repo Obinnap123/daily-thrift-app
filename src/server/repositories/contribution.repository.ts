@@ -15,14 +15,9 @@ import { format } from "date-fns";
 import { countUnfundedPastDays } from "@/lib/collection-day-state";
 
 /**
- * The NORMAL (non-override) Contribution row for a given plan + day, if one
- * was recorded — this is what the duplicate-payment check queries. Uses
- * findFirst rather than findUnique: since the Quick Pay migration, the
- * database's uniqueness guarantee for (contributionPlanId, collectionDate)
- * is a PARTIAL unique index scoped to isOverride = false rows (see
- * migration 20260727130000), so Prisma no longer exposes this pair as a
- * plain compound unique key — but filtering isOverride: false here means
- * at most one such row can ever exist per plan+day regardless.
+ * A legacy non-override Contribution row for a given plan and day, if any.
+ * Multiple such rows may now exist. Callers needing totals must query all
+ * rows rather than treating this as a unique daily payment.
  */
 export async function findContributionForPlanAndDate(
   contributionPlanId: string,

@@ -17,7 +17,7 @@ import {
 } from "@/server/repositories/contribution.repository";
 import { today } from "@/lib/date";
 import { resolveCollectionDayState } from "@/lib/collection-day-state";
-import { getPaidOutByAgentToday } from "@/server/repositories/financial.repository";
+import { getAgentFinancialOverview } from "@/server/repositories/financial.repository";
 import { DashboardHeader } from "@/components/layout/DashboardHeader";
 import { DashboardNav } from "@/components/layout/DashboardNav";
 import { Card } from "@/components/ui/Card";
@@ -44,13 +44,13 @@ export default async function AgentDashboardPage() {
     activity,
     outstanding,
     activePlansToday,
-    paidOutToday,
+    financial,
   ] = await Promise.all([
     listCustomerProfiles({ agentId: user.id }),
     getDashboardContributionSummary(user.id),
     sumOutstandingForAgent(user.id, businessDate),
     listActivePlansForAgent(user.id, businessDate),
-    getPaidOutByAgentToday(user.id),
+    getAgentFinancialOverview(user.id),
   ]);
 
   const todayCounts = { visited: activity.visitedToday, collected: activity.collectedToday };
@@ -76,7 +76,7 @@ export default async function AgentDashboardPage() {
   // Quick Pay (modal): the searchable customer dropdown covers EVERY one
   // of this agent's customers, not just those not-yet-recorded-today — the
   // modal is the general-purpose entry point (any customer, any time,
-  // including an Admin-approved same-day override), distinct from the
+  // including an additional same-day payment), distinct from the
   // inline widget above which only covers the common "hasn't paid yet
   // today" case.
   const quickPayCustomers = myCustomers.map((customer) => ({
@@ -101,11 +101,17 @@ export default async function AgentDashboardPage() {
           <QuickPayButton customers={quickPayCustomers} isAdmin={false} label="Quick Pay" />
         </div>
 
-        <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2 lg:grid-cols-3">
           <StatCard label="Customers Assigned" value={activeCustomerCount} />
+          <StatCard label="Paid Out by You Today" value={`₦${financial.paidOutToday.toLocaleString()}`} tone="green" />
+          <StatCard
+            label="Customers’ Savings Balance"
+            value={`₦${financial.customersSavingsBalance.toLocaleString()}`}
+            description="Savings remaining across your assigned customers."
+            className="min-[380px]:col-span-2 lg:col-span-1"
+          />
           <StatCard label="Visited Today" value={todayCounts.visited} />
           <StatCard label="Collected Today" value={todayCounts.collected} tone="green" />
-          <StatCard label="Paid Out by You Today" value={`₦${paidOutToday.toLocaleString()}`} tone="green" />
           <StatCard label="Total Collected Today" value={`₦${totalToday.toLocaleString()}`} />
           <StatCard label="Total This Week" value={`₦${totalWeek.toLocaleString()}`} />
           <StatCard label="Total This Month" value={`₦${totalMonth.toLocaleString()}`} />
@@ -188,7 +194,7 @@ export default async function AgentDashboardPage() {
                 <tr>
                   <th className="px-4 py-3 font-medium">Name</th>
                   <th className="px-4 py-3 font-medium">Phone</th>
-                  <th className="px-4 py-3 font-medium">ID Number</th>
+                  <th className="px-4 py-3 font-medium">Customer No.</th>
                   <th className="px-4 py-3 font-medium">Status</th>
                   <th className="px-4 py-3 font-medium"></th>
                 </tr>
@@ -200,7 +206,7 @@ export default async function AgentDashboardPage() {
                       {customer.user.name}
                     </td>
                     <td className="px-4 py-3 text-gray-600">{customer.user.phone}</td>
-                    <td className="px-4 py-3 text-gray-600">{customer.idNumber}</td>
+                    <td className="px-4 py-3 text-gray-600">{customer.customerNumber}</td>
                     <td className="px-4 py-3">
                       <Badge tone={customer.user.isActive ? "green" : "red"}>
                         {customer.user.isActive ? "Active" : "Inactive"}
@@ -229,10 +235,14 @@ function StatCard({
   label,
   value,
   tone,
+  description,
+  className,
 }: {
   label: string;
   value: string | number;
   tone?: "green" | "red" | "amber";
+  description?: string;
+  className?: string;
 }) {
   const toneClass =
     tone === "green"
@@ -243,9 +253,10 @@ function StatCard({
           ? "text-amber-700"
           : "text-gray-900";
   return (
-    <Card>
+    <Card className={className}>
       <p className="text-xs text-gray-500">{label}</p>
-      <p className={`mt-1 text-2xl font-bold ${toneClass}`}>{value}</p>
+      <p className={`mt-1 break-words text-2xl font-bold tabular-nums ${toneClass}`}>{value}</p>
+      {description && <p className="mt-2 text-xs leading-relaxed text-ink-muted">{description}</p>}
     </Card>
   );
 }

@@ -14,7 +14,8 @@ export async function getFinancialOverview() {
   }>>`
     SELECT
       COALESCE((SELECT SUM(c.amount) FROM contributions c WHERE c.status = 'COLLECTED'), 0) AS lifetime,
-      COALESCE((SELECT SUM(c.amount) FROM contributions c JOIN contribution_plans p ON p.id = c."contributionPlanId" WHERE c.status = 'COLLECTED' AND p.status = 'ACTIVE'), 0) AS active,
+      COALESCE((SELECT SUM(c.amount) FROM contributions c WHERE c.status = 'COLLECTED'), 0)
+        - COALESCE((SELECT SUM(p."grossSavings") FROM payouts p), 0) AS active,
       COALESCE((SELECT SUM(p."grossSavings") FROM payouts p), 0) AS "grossClosed",
       COALESCE((SELECT SUM(p."customerAmount") FROM payouts p), 0) AS paid,
       COALESCE((SELECT SUM(p."customerAmount") FROM payouts p WHERE p."payoutDate" = ${businessDate}), 0) AS "paidToday",
@@ -38,15 +39,39 @@ export async function getFinancialOverview() {
   };
 }
 
-/** Net customer amount personally paid out by one Agent on the Lagos business date. */
-export async function getPaidOutByAgentToday(agentId: string): Promise<number> {
-  const result = await prisma.payout.aggregate({
-    where: {
-      approvedById: agentId,
-      payoutDate: today(),
-    },
-    _sum: { customerAmount: true },
-  });
+/** Current customer portfolio balance, plus this Agent's own payouts today. */
+export async function getAgentFinancialOverview(agentId: string) {
+  const businessDate = today();
+  const [row] = await prisma.$queryRaw<Array<{
+    lifetimeCollections: unknown;
+    grossClosed: unknown;
+    paidOutToday: unknown;
+  }>>`
+    SELECT
+      COALESCE((
+        SELECT SUM(c.amount)
+        FROM contributions c
+        JOIN customer_profiles cp ON cp.id = c."customerProfileId"
+        WHERE cp."assignedAgentId" = ${agentId} AND c.status = 'COLLECTED'
+      ), 0) AS "lifetimeCollections",
+      COALESCE((
+        SELECT SUM(p."grossSavings")
+        FROM payouts p
+        JOIN customer_profiles cp ON cp.id = p."customerProfileId"
+        WHERE cp."assignedAgentId" = ${agentId}
+      ), 0) AS "grossClosed",
+      COALESCE((
+        SELECT SUM(p."customerAmount")
+        FROM payouts p
+        WHERE p."approvedById" = ${agentId} AND p."payoutDate" = ${businessDate}
+      ), 0) AS "paidOutToday"
+  `;
 
-  return Number(result._sum.customerAmount ?? 0);
+  return {
+    customersSavingsBalance: calculateAvailableBalance(
+      Number(row?.lifetimeCollections ?? 0),
+      Number(row?.grossClosed ?? 0),
+    ),
+    paidOutToday: Number(row?.paidOutToday ?? 0),
+  };
 }
