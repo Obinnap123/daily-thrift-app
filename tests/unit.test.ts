@@ -1,6 +1,59 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { parseSessionSecurityClaims, isSessionSecurityStateCurrent } from "../src/lib/session-revocation";
+import { navigationForPath } from "../src/components/layout/navigation";
 import { calculateContributionAllocation } from "../src/lib/contribution-allocation";
+import { sendAgentInvitationEmail } from "../src/server/services/email.service";
+
+test("Super Admin sessions are valid only while the account role and version match", () => {
+  const claims = parseSessionSecurityClaims({ id: "owner-1", role: "SUPER_ADMIN", sessionVersion: 4 });
+  assert.ok(claims);
+  assert.equal(isSessionSecurityStateCurrent(claims, { isActive: true, role: "SUPER_ADMIN", sessionVersion: 4 }), true);
+  assert.equal(isSessionSecurityStateCurrent(claims, { isActive: true, role: "ADMIN", sessionVersion: 4 }), false);
+  assert.equal(isSessionSecurityStateCurrent(claims, { isActive: true, role: "SUPER_ADMIN", sessionVersion: 3 }), false);
+});
+
+test("Super Admin navigation is separate from Admin and Agent destinations", () => {
+  assert.deepEqual(navigationForPath("/super-admin/admin").map((item) => item.href), ["/super-admin", "/super-admin/activity", "/super-admin/admin"]);
+  assert.equal(navigationForPath("/admin")[0].href, "/admin");
+  assert.equal(navigationForPath("/agent")[0].href, "/agent");
+});
+
+test("Admin invitation uses the staff email service with an Admin-specific link", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousKey = process.env.RESEND_API_KEY;
+  const previousFrom = process.env.RESEND_FROM_EMAIL;
+  const sent: Array<{ to: string[]; subject: string; text: string }> = [];
+
+  try {
+    process.env.RESEND_API_KEY = "test-key";
+    process.env.RESEND_FROM_EMAIL = "Davchuks <test@example.com>";
+    globalThis.fetch = async (_input, init) => {
+      sent.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ id: "test-email-id" }), { status: 200 });
+    };
+
+    const result = await sendAgentInvitationEmail({
+      to: "new-admin@example.com",
+      agentName: "New Admin",
+      invitationToken: "test-token",
+      applicationOrigin: "http://127.0.0.1:3001",
+      role: "Admin",
+      idempotencyKey: "admin-invite-test",
+    });
+
+    assert.equal(result.success, true);
+    assert.deepEqual(sent[0]?.to, ["new-admin@example.com"]);
+    assert.equal(sent[0]?.subject, "Verify your Davchuks admin account");
+    assert.match(sent[0]?.text ?? "", /http:\/\/127\.0\.0\.1:3001\/verify-email\?token=test-token/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.RESEND_API_KEY;
+    else process.env.RESEND_API_KEY = previousKey;
+    if (previousFrom === undefined) delete process.env.RESEND_FROM_EMAIL;
+    else process.env.RESEND_FROM_EMAIL = previousFrom;
+  }
+});
 import { quickPaySchema } from "../src/validations/contribution";
 import { quickPayRevalidationPaths } from "../src/lib/contribution-revalidation";
 import {

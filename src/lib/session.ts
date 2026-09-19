@@ -36,6 +36,7 @@ export async function requireRole(allowedRoles: Role | Role[]) {
 
   if (!roles.includes(user.role)) {
     const roleHome: Record<Role, string> = {
+      SUPER_ADMIN: "/super-admin",
       ADMIN: "/admin",
       AGENT: "/agent",
       CUSTOMER: "/customer",

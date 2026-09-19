@@ -1,7 +1,7 @@
 /**
  * Database seed script.
  * ----------------------------------------------------------------------------
- * Creates the very first Admin account so someone can log in and start
+ * Creates the first Super Admin account on a fresh installation so someone can log in and start
  * using the system (there is intentionally no public self-registration
  * page — accounts are created by an Admin from inside the app in later
  * steps).
@@ -27,8 +27,13 @@ async function main() {
 
   const existingAdmin = await prisma.user.findUnique({ where: { email } });
   if (existingAdmin) {
-    console.log(`Admin account already exists for ${email}. Skipping.`);
+    console.log(`Seed account already exists for ${email}. Skipping. Existing roles are never changed by seed.`);
     return;
+  }
+
+  const existingSuperAdmin = await prisma.user.findFirst({ where: { role: "SUPER_ADMIN", isActive: true }, select: { id: true } });
+  if (existingSuperAdmin) {
+    throw new Error("An active Super Admin already exists; seed will not create another.");
   }
 
   const passwordHash = await hashPassword(password);
@@ -38,13 +43,13 @@ async function main() {
       name,
       email,
       passwordHash,
-      role: "ADMIN",
+      role: "SUPER_ADMIN",
       emailVerifiedAt: new Date(),
     },
   });
 
   console.log("----------------------------------------------------------");
-  console.log("✅ Admin account created:");
+  console.log("✅ Super Admin account created:");
   console.log(`   Email:    ${admin.email}`);
   console.log("   Password: stored securely in the seed environment");
   console.log("----------------------------------------------------------");

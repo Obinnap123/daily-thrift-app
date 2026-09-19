@@ -39,7 +39,7 @@ const ROLE_FIELD_CONFIG: Record<
     placeholder: "you@example.com",
     type: "email",
     autoComplete: "username",
-    hint: "Sign in with your Admin email address.",
+    hint: "Sign in with your Admin or Super Admin email address.",
   },
   agent: {
     label: "Email Address",
@@ -69,7 +69,7 @@ export function LoginForm({ role }: LoginFormProps) {
   const [formError, setFormError] = useState<string | null>(null);
   const [isRedirecting, setIsRedirecting] = useState(false);
   const fieldConfig = ROLE_FIELD_CONFIG[role];
-  const emailVerified = role === "agent" && searchParams.get("verified") === "1";
+  const emailVerified = (role === "agent" || role === "admin") && searchParams.get("verified") === "1";
 
   const {
     register,
@@ -95,6 +95,13 @@ export function LoginForm({ role }: LoginFormProps) {
     }
 
     setIsRedirecting(true);
+    // The Admin portal serves both Admin and Super Admin. The root page
+    // resolves the signed-in role server-side without trusting the form.
+    if (role === "admin") {
+      router.replace("/");
+      router.refresh();
+      return;
+    }
     const roleHome = `/${role}`;
     const requested = searchParams.get("callbackUrl");
     const callbackUrl = requested?.startsWith(`${roleHome}/`) || requested === roleHome
