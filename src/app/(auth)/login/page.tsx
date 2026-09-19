@@ -17,7 +17,7 @@ const ROLE_LOGIN_LINKS = [
   {
     href: "/login/admin",
     label: "Admin Login",
-    description: "For system administrators managing agents, customers, and reports.",
+    description: "For the Admin managing daily operations and the Super Admin overseeing them.",
     icon: AdminIcon,
   },
   {
