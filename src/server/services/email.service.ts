@@ -8,6 +8,7 @@ interface SendAgentInvitationInput {
   invitationToken: string;
   applicationOrigin: string;
   idempotencyKey: string;
+  role?: "Agent" | "Admin";
 }
 
 export async function sendAgentInvitationEmail(
@@ -28,6 +29,7 @@ export async function sendAgentInvitationEmail(
   verificationUrl.searchParams.set("token", input.invitationToken);
 
   const safeName = escapeHtml(input.agentName);
+  const role = input.role ?? "Agent";
   const url = verificationUrl.toString();
   let response: Response;
   try {
@@ -41,18 +43,18 @@ export async function sendAgentInvitationEmail(
       body: JSON.stringify({
         from,
         to: [input.to],
-        subject: "Verify your Davchuks agent account",
+        subject: `Verify your Davchuks ${role.toLowerCase()} account`,
         html: `
           <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#13251d">
             <h1 style="font-size:22px">Welcome to Davchuks Daily Thrift</h1>
             <p>Hello ${safeName},</p>
-            <p>An administrator created an Agent account for this email address.</p>
+            <p>An administrator created an ${role} account for this email address.</p>
             <p>Verify your email and create your private password using the secure button below.</p>
             <p style="margin:28px 0"><a href="${url}" style="background:#087f5b;color:white;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:600">Verify email &amp; create password</a></p>
             <p>This invitation expires in 48 hours. If you were not expecting it, you can ignore this email.</p>
           </div>
         `,
-        text: `Hello ${input.agentName},\n\nVerify your Davchuks Agent account and create your password: ${url}\n\nThis invitation expires in 48 hours.`,
+        text: `Hello ${input.agentName},\n\nVerify your Davchuks ${role} account and create your password: ${url}\n\nThis invitation expires in 48 hours.`,
       }),
       signal: AbortSignal.timeout(15_000),
     });

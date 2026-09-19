@@ -37,6 +37,7 @@ datasource db {
 /// Application-wide user roles. Determines which dashboard and permissions
 /// a logged-in user gets.
 enum Role {
+  SUPER_ADMIN // Owner oversight and management of the regular Admin account
   ADMIN // Full system access: manage agents, customers, reports, settings
   AGENT // Field collector: registers customers, records daily contributions
   CUSTOMER // Thrift contributor: views own savings progress and payout status
