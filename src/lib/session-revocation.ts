@@ -18,7 +18,7 @@ export function parseSessionSecurityClaims(input: {
   sessionVersion?: unknown;
 }): SessionSecurityClaims | null {
   const role =
-    input.role === "ADMIN" || input.role === "AGENT" || input.role === "CUSTOMER"
+    input.role === "SUPER_ADMIN" || input.role === "ADMIN" || input.role === "AGENT" || input.role === "CUSTOMER"
       ? input.role
       : null;
 
