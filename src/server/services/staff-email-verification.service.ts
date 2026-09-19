@@ -17,17 +17,18 @@ export async function getAgentInvitationDetails(token: string) {
   if (token.length < 32) return null;
   const invitation = await prisma.staffEmailVerificationToken.findUnique({
     where: { tokenHash: hashStaffVerificationToken(token) },
-    include: { user: { select: { name: true, email: true, role: true, emailVerifiedAt: true } } },
+    include: { user: { select: { name: true, email: true, role: true, isActive: true, emailVerifiedAt: true } } },
   });
   if (
     !invitation ||
     invitation.expiresAt <= new Date() ||
-    invitation.user.role !== "AGENT" ||
+    !invitation.user.isActive ||
+    (invitation.user.role !== "AGENT" && invitation.user.role !== "ADMIN") ||
     invitation.user.emailVerifiedAt
   ) {
     return null;
   }
-  return { name: invitation.user.name, email: invitation.user.email };
+  return { name: invitation.user.name, email: invitation.user.email, role: invitation.user.role };
 }
 
 export async function refreshAgentInvitationToken(agentId: string): Promise<ActionResult<{
@@ -85,12 +86,13 @@ export async function completeAgentInvitation(
   const result = await prisma.$transaction(async (tx) => {
     const invitation = await tx.staffEmailVerificationToken.findUnique({
       where: { tokenHash },
-      include: { user: { select: { id: true, role: true, emailVerifiedAt: true } } },
+      include: { user: { select: { id: true, role: true, isActive: true, emailVerifiedAt: true } } },
     });
     if (
       !invitation ||
       invitation.expiresAt <= new Date() ||
-      invitation.user.role !== "AGENT" ||
+      !invitation.user.isActive ||
+      (invitation.user.role !== "AGENT" && invitation.user.role !== "ADMIN") ||
       invitation.user.emailVerifiedAt
     ) {
       return { success: false as const, error: "This invitation is invalid or has expired." };
@@ -113,12 +115,12 @@ export async function completeAgentInvitation(
     });
     await createAuditLog(tx, {
       actorId: invitation.user.id,
-      actorRole: "AGENT",
+      actorRole: invitation.user.role,
       action: "STAFF_EMAIL_VERIFIED",
       outcome: "SUCCESS",
       entityType: "User",
       entityId: invitation.user.id,
-      summary: "Agent verified their email and created a password.",
+      summary: `${invitation.user.role === "ADMIN" ? "Admin" : "Agent"} verified their email and created a password.`,
     }, audit);
 
     return { success: true as const, agentId: invitation.user.id };

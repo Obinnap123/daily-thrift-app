@@ -1,5 +1,5 @@
 /**
- * Route protection middleware.
+ * Route protection proxy.
  * ----------------------------------------------------------------------------
  * Runs on every request (except static assets) and:
  *  1. Redirects unauthenticated users away from any /admin, /agent, /customer
@@ -9,14 +9,13 @@
  *
  * Fine-grained per-page authorization (e.g. "can this Agent edit this
  * specific Customer") still happens inside each route/API handler — this
- * middleware only handles coarse-grained section access.
+ * proxy only handles coarse-grained section access.
  */
-// IMPORTANT: Middleware runs on the Edge Runtime, which cannot load Prisma
-// (Node-only APIs). We therefore build a lightweight NextAuth instance here
-// from the edge-safe `authConfig` only (no Credentials provider / DB calls)
-// purely to read/verify the session JWT. The full auth instance with the
-// database-backed provider lives in `src/lib/auth.ts` for use in API routes
-// and Server Components (Node runtime).
+// IMPORTANT: Proxy must stay independent of the application's Prisma client.
+// We therefore build a lightweight NextAuth instance here from the shared
+// `authConfig` only (no Credentials provider / DB calls), purely to read and
+// verify the session JWT. The full database-backed auth instance remains in
+// `src/lib/auth.ts` for API routes and Server Components.
 import NextAuth from "next-auth";
 import { authConfig } from "@/lib/auth.config";
 import { NextResponse } from "next/server";
@@ -24,22 +23,24 @@ import { NextResponse } from "next/server";
 const { auth } = NextAuth(authConfig);
 
 const ROLE_HOME: Record<string, string> = {
+  SUPER_ADMIN: "/super-admin",
   ADMIN: "/admin",
   AGENT: "/agent",
   CUSTOMER: "/customer",
 };
 
-export default auth((req) => {
+const protectedRouteProxy = auth((req) => {
   const { nextUrl } = req;
   const isLoggedIn = !!req.auth;
   const role = req.auth?.user?.role;
 
   const isOnAdminSection = nextUrl.pathname.startsWith("/admin");
+  const isOnSuperAdminSection = nextUrl.pathname.startsWith("/super-admin");
   const isOnAgentSection = nextUrl.pathname.startsWith("/agent");
   const isOnCustomerSection = nextUrl.pathname.startsWith("/customer");
 
   // 1. Not logged in but trying to reach a protected dashboard -> send to login.
-  if (!isLoggedIn && (isOnAdminSection || isOnAgentSection || isOnCustomerSection)) {
+  if (!isLoggedIn && (isOnSuperAdminSection || isOnAdminSection || isOnAgentSection || isOnCustomerSection)) {
     const loginUrl = new URL("/login", nextUrl.origin);
     loginUrl.searchParams.set("callbackUrl", nextUrl.pathname);
     return NextResponse.redirect(loginUrl);
@@ -47,6 +48,9 @@ export default auth((req) => {
 
   // 2. Logged in but role doesn't match the section they're trying to access.
   if (isLoggedIn) {
+    if (isOnSuperAdminSection && role !== "SUPER_ADMIN") {
+      return NextResponse.redirect(new URL(ROLE_HOME[role ?? ""] ?? "/", nextUrl.origin));
+    }
     if (isOnAdminSection && role !== "ADMIN") {
       return NextResponse.redirect(new URL(ROLE_HOME[role ?? ""] ?? "/", nextUrl.origin));
     }
@@ -61,7 +65,9 @@ export default auth((req) => {
   return NextResponse.next();
 });
 
-// Only run middleware on real pages — skip static files, images, and
+export default protectedRouteProxy;
+
+// Only run the proxy on real pages — skip static files, images, and
 // Next.js internals for performance.
 export const config = {
   matcher: [

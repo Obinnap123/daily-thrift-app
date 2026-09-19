@@ -11,6 +11,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 
 const ROLE_HOME: Record<string, string> = {
+  SUPER_ADMIN: "/super-admin",
   ADMIN: "/admin",
   AGENT: "/agent",
   CUSTOMER: "/customer",
