@@ -25,7 +25,7 @@ export function DashboardHeader({ title }: { title: string }) {
         <h1 className="truncate text-base font-semibold text-ink sm:text-lg">{title}</h1>
         {session?.user && (
           <p className="truncate text-xs text-ink-muted sm:text-sm">
-            {session.user.name} · <span className="capitalize">{session.user.role.toLowerCase()}</span>
+            {session.user.name} · <span className="capitalize">{session.user.role.toLowerCase().replaceAll("_", " ")}</span>
           </p>
         )}
       </div>

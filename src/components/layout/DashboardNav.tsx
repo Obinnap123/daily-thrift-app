@@ -88,7 +88,7 @@ export function DashboardNav({ links: _links }: { links?: NavLink[] }) {
 function SidebarContent({ links, pathname, onClose }: { links: AppNavigationItem[]; pathname: string; onClose?: () => void }) {
   return <>
     <div className="flex items-center justify-between px-2 pb-6 pt-1">
-      <Link href={pathname.startsWith("/admin") ? "/admin" : "/agent"} className="flex items-center gap-3 rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand">
+      <Link href={pathname.startsWith("/super-admin") ? "/super-admin" : pathname.startsWith("/admin") ? "/admin" : "/agent"} className="flex items-center gap-3 rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand">
         <BrandMark />
         <span><span className="block text-sm font-bold text-ink">Davchuks</span><span className="block text-xs text-ink-muted">Daily Thrift</span></span>
       </Link>
@@ -130,7 +130,7 @@ function NavigationLink({ link, pathname }: { link: AppNavigationItem; pathname:
 }
 
 function isNavigationLinkActive(pathname: string, href: string) {
-  if (href === "/admin" || href === "/agent") return pathname === href;
+  if (href === "/super-admin" || href === "/admin" || href === "/agent") return pathname === href;
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 

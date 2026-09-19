@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { useToast } from "@/components/providers/ToastProvider";
 
-export function SetAgentPasswordForm({ token, email }: { token: string; email: string }) {
+export function SetAgentPasswordForm({ token, email, role }: { token: string; email: string; role: "ADMIN" | "AGENT" }) {
   const router = useRouter();
   const { showToast } = useToast();
   const [formError, setFormError] = useState<string | null>(null);
@@ -41,7 +41,7 @@ export function SetAgentPasswordForm({ token, email }: { token: string; email: s
     }
 
     showToast({ type: "success", message: "Email verified. You can now sign in." });
-    router.replace("/login/agent?verified=1");
+    router.replace(`/login/${role === "ADMIN" ? "admin" : "agent"}?verified=1`);
   }
 
   return (
