@@ -124,7 +124,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         // failed. The browser still receives one generic credentials error.
         const isValidPassword = await verifyPassword(password, user.passwordHash);
 
-        if (user.role !== portalRole) {
+        if (user.role !== portalRole && !(portalRole === "ADMIN" && user.role === "SUPER_ADMIN")) {
           return rejectLogin("Sign-in rejected: incorrect portal.", user);
         }
 
@@ -133,7 +133,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           return rejectLogin("Sign-in rejected: account is inactive.", user);
         }
 
-        if ((user.role === "ADMIN" || user.role === "AGENT") && !user.emailVerifiedAt) {
+        if ((user.role === "SUPER_ADMIN" || user.role === "ADMIN" || user.role === "AGENT") && !user.emailVerifiedAt) {
           return rejectLogin("Sign-in rejected: staff email is not verified.", user);
         }
 

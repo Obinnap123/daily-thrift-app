@@ -1,4 +1,4 @@
-export type NavigationRole = "ADMIN" | "AGENT";
+export type NavigationRole = "SUPER_ADMIN" | "ADMIN" | "AGENT";
 
 export interface AppNavigationItem {
   href: string;
@@ -7,6 +7,11 @@ export interface AppNavigationItem {
 }
 
 export const APP_NAVIGATION: Record<NavigationRole, AppNavigationItem[]> = {
+  SUPER_ADMIN: [
+    { href: "/super-admin", label: "Overview", icon: "home" },
+    { href: "/super-admin/activity", label: "Admin activity", icon: "audit" },
+    { href: "/super-admin/admin", label: "Admin account", icon: "people" },
+  ],
   ADMIN: [
     { href: "/admin", label: "Overview", icon: "home" },
     { href: "/admin/agents", label: "Agents", icon: "people" },
@@ -31,5 +36,6 @@ export const APP_NAVIGATION: Record<NavigationRole, AppNavigationItem[]> = {
 };
 
 export function navigationForPath(pathname: string): AppNavigationItem[] {
+  if (pathname.startsWith("/super-admin")) return APP_NAVIGATION.SUPER_ADMIN;
   return pathname.startsWith("/admin") ? APP_NAVIGATION.ADMIN : APP_NAVIGATION.AGENT;
 }
