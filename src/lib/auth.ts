@@ -129,7 +129,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         }
 
         // Block disabled accounts (e.g. an agent who was let go).
-        if (!user.isActive) {
+        if (!user.isActive || user.archivedAt) {
           return rejectLogin("Sign-in rejected: account is inactive.", user);
         }
 
@@ -184,7 +184,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
       const currentAccount = await prisma.user.findUnique({
         where: { id: claims.userId },
-        select: { isActive: true, role: true, sessionVersion: true },
+        select: { isActive: true, role: true, sessionVersion: true, archivedAt: true },
       });
 
       token.revoked = !isSessionSecurityStateCurrent(claims, currentAccount);

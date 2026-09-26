@@ -13,6 +13,9 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
     "src/generated/**",
+    // Local assistant/worktree metadata is not part of the application.
+    ".kilo/**",
+    ".agents/**",
   ]),
 ]);
 

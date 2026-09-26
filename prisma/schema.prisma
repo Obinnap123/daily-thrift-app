@@ -140,6 +140,9 @@ model User {
   /// Staff must prove they control their login email before signing in.
   /// Customer accounts use phone login and do not require this field.
   emailVerifiedAt DateTime?
+  /// Archived staff accounts cannot sign in or be reactivated, but their
+  /// historical financial and audit relationships remain intact.
+  archivedAt      DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -186,7 +189,7 @@ model User {
   notifications                    Notification[]
   auditLogs                        AuditLog[]
   missingPaymentReportsReviewed    MissingPaymentReport[]          @relation("MissingPaymentReportReviewedBy")
-  staffEmailVerificationToken      StaffEmailVerificationToken?
+  staffEmailVerificationTokens     StaffEmailVerificationToken[]
   contributionCorrectionsRequested ContributionCorrectionRequest[] @relation("CorrectionRequestedBy")
   contributionCorrectionsReviewed  ContributionCorrectionRequest[] @relation("CorrectionReviewedBy")
 
@@ -299,6 +302,9 @@ model AgentAssignmentLog {
   createdAt DateTime @default(now())
 
   @@index([customerProfileId])
+  @@index([previousAgentId])
+  @@index([newAgentId])
+  @@index([changedById])
   @@map("agent_assignment_logs")
 }
 
@@ -443,6 +449,7 @@ model Contribution {
   /// This is a non-unique lookup index; each payment has its own receipt.
   @@index([contributionPlanId, collectionDate])
   @@index([customerProfileId])
+  @@index([overriddenById])
   @@index([collectedById, collectionDate])
   @@index([collectionDate])
   @@map("contributions")
@@ -534,6 +541,7 @@ model DailyReconciliation {
   /// One reconciliation report per agent per day.
   @@unique([agentId, reconciliationDate])
   @@index([status])
+  @@index([reviewedById])
   @@map("daily_reconciliations")
 }
 
@@ -599,6 +607,7 @@ model Payout {
   @@index([customerProfileId])
   @@index([contributionPlanId])
   @@index([payoutDate])
+  @@index([approvedById])
   @@map("payouts")
 }
 
@@ -666,6 +675,8 @@ model ContributionCorrectionRequest {
   @@index([status, createdAt])
   @@index([requestedById, status])
   @@index([contributionId])
+  @@index([customerProfileId])
+  @@index([reviewedById])
   @@map("contribution_correction_requests")
 }
 
@@ -725,6 +736,8 @@ model AuditLog {
   @@index([createdAt])
   @@index([actorId, createdAt])
   @@index([action, outcome])
+  @@index([actorRole, createdAt, id])
+  @@index([actorRole, outcome, createdAt, id])
   @@map("audit_logs")
 }
 
@@ -733,14 +746,32 @@ model AuditLog {
 /// its SHA-256 digest so a database read cannot reveal usable invite links.
 model StaffEmailVerificationToken {
   id        String   @id @default(cuid())
-  userId    String   @unique
+  userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   tokenHash String   @unique
   expiresAt DateTime
+  /// Set only after the email provider confirms acceptance. Pending tokens
+  /// are never accepted by the verification page.
+  deliveredAt DateTime?
   createdAt DateTime @default(now())
 
   @@index([expiresAt])
+  @@index([userId, createdAt])
   @@map("staff_email_verification_tokens")
+}
+
+/// Incremental company-wide totals maintained by database triggers. Keeping
+/// one trusted aggregate row avoids scanning the complete financial history
+/// on every Admin and Super Admin dashboard request.
+model BusinessFinancialSummary {
+  id                  String   @id @default("default")
+  lifetimeCollections Decimal  @default(0) @db.Decimal(18, 2)
+  grossSavingsClosed  Decimal  @default(0) @db.Decimal(18, 2)
+  paidOutToCustomers  Decimal  @default(0) @db.Decimal(18, 2)
+  commissionEarned    Decimal  @default(0) @db.Decimal(18, 2)
+  updatedAt           DateTime @updatedAt
+
+  @@map("business_financial_summaries")
 }
 
 /// A customer-raised concern that money they handed over is not reflected in
@@ -772,5 +803,7 @@ model MissingPaymentReport {
 
   @@index([status, createdAt])
   @@index([customerProfileId, createdAt])
+  @@index([contributionPlanId])
+  @@index([reviewedById])
   @@map("missing_payment_reports")
 }

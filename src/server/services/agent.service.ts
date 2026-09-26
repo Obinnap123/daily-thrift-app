@@ -147,10 +147,11 @@ export async function updateAgent(input: EditAgentInput): Promise<ActionResult<{
       select: { id: true, name: true, email: true },
     });
     if (invitation) {
-      await tx.staffEmailVerificationToken.upsert({
-        where: { userId: id },
-        create: { userId: id, tokenHash: invitation.tokenHash, expiresAt: invitation.expiresAt },
-        update: { tokenHash: invitation.tokenHash, expiresAt: invitation.expiresAt, createdAt: new Date() },
+      // A token sent to the previous email address must never verify the new
+      // address. The new token remains pending until delivery is confirmed.
+      await tx.staffEmailVerificationToken.deleteMany({ where: { userId: id } });
+      await tx.staffEmailVerificationToken.create({
+        data: { userId: id, tokenHash: invitation.tokenHash, expiresAt: invitation.expiresAt },
       });
     }
     return updated;

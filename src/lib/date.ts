@@ -8,7 +8,23 @@
  * `collectionDate` values are always comparable regardless of what time of
  * day the agent happened to press "record".
  */
-const BUSINESS_TIME_ZONE = "Africa/Lagos";
+export const BUSINESS_TIME_ZONE = "Africa/Lagos";
+
+/**
+ * Format an operational timestamp consistently on the server and in the
+ * browser. An explicit locale and time zone prevents React hydration
+ * mismatches when Vercel renders in UTC and the browser is in Lagos time.
+ */
+export function formatBusinessDateTime(date: Date | string): string {
+  return new Intl.DateTimeFormat("en-NG", {
+    timeZone: BUSINESS_TIME_ZONE,
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(date));
+}
 
 /** Preserve a calendar date at UTC midnight — safe for a Postgres `DATE` column. */
 export function toDateOnly(date: Date): Date {

@@ -10,6 +10,7 @@ interface CurrentAccountSecurityState {
   isActive: boolean;
   role: Role;
   sessionVersion: number;
+  archivedAt?: Date | null;
 }
 
 export function parseSessionSecurityClaims(input: {
@@ -42,6 +43,7 @@ export function isSessionSecurityStateCurrent(
 ): boolean {
   return Boolean(
     account?.isActive &&
+      !account.archivedAt &&
       account.role === claims.role &&
       account.sessionVersion === claims.sessionVersion,
   );

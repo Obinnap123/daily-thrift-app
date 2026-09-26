@@ -12,11 +12,30 @@ import {
   hashStaffVerificationToken,
 } from "@/lib/staff-verification-token";
 import { createAuditLog, type AuditRequestContext } from "@/server/services/audit.service";
+import {
+  applySecurityThrottleDelay,
+  checkSecurityThrottle,
+  clearSecurityThrottle,
+  createSecurityThrottleBucket,
+  recordSecurityThrottleFailure,
+  type SecurityThrottleBucket,
+} from "@/server/services/security-throttle.service";
+
+const VERIFICATION_WINDOW_MS = 15 * 60 * 1000;
+const VERIFICATION_LOCK_MS = 15 * 60 * 1000;
+
+function verificationBuckets(tokenHash: string, ipAddress: string | null): SecurityThrottleBucket[] {
+  const buckets = [createSecurityThrottleBucket("STAFF_VERIFICATION_TOKEN", tokenHash, 5)];
+  if (ipAddress) {
+    buckets.push(createSecurityThrottleBucket("STAFF_VERIFICATION_IP", ipAddress, 40));
+  }
+  return buckets;
+}
 
 export async function getAgentInvitationDetails(token: string) {
   if (token.length < 32) return null;
   const invitation = await prisma.staffEmailVerificationToken.findUnique({
-    where: { tokenHash: hashStaffVerificationToken(token) },
+    where: { tokenHash: hashStaffVerificationToken(token), deliveredAt: { not: null } },
     include: { user: { select: { name: true, email: true, role: true, isActive: true, emailVerifiedAt: true } } },
   });
   if (
@@ -49,17 +68,11 @@ export async function refreshAgentInvitationToken(agentId: string): Promise<Acti
     }
     if (!agent.email) return { success: false as const, error: "This agent has no email address." };
 
-    await tx.staffEmailVerificationToken.upsert({
-      where: { userId: agent.id },
-      create: {
+    await tx.staffEmailVerificationToken.create({
+      data: {
         userId: agent.id,
         tokenHash: invitation.tokenHash,
         expiresAt: invitation.expiresAt,
-      },
-      update: {
-        tokenHash: invitation.tokenHash,
-        expiresAt: invitation.expiresAt,
-        createdAt: new Date(),
       },
     });
     return { success: true as const, agent };
@@ -82,10 +95,41 @@ export async function completeAgentInvitation(
   if (!parsed.success) return fail("Please correct the highlighted fields.");
 
   const tokenHash = hashStaffVerificationToken(parsed.data.token);
+  const buckets = verificationBuckets(tokenHash, audit.ipAddress);
+  const throttle = await checkSecurityThrottle(
+    buckets,
+    { windowMs: VERIFICATION_WINDOW_MS, maximumDelayMs: 2_000 },
+  );
+  await applySecurityThrottleDelay(throttle.delayMs);
+  if (throttle.blocked) {
+    return fail("Too many verification attempts. Please wait 15 minutes and try again.");
+  }
+
+  // Verify the public token before doing the deliberately expensive bcrypt
+  // work. Random invalid tokens therefore cannot be used to exhaust CPU.
+  const candidate = await prisma.staffEmailVerificationToken.findUnique({
+    where: { tokenHash, deliveredAt: { not: null } },
+    include: { user: { select: { role: true, isActive: true, emailVerifiedAt: true } } },
+  });
+  if (
+    !candidate ||
+    candidate.expiresAt <= new Date() ||
+    !candidate.user.isActive ||
+    (candidate.user.role !== "AGENT" && candidate.user.role !== "ADMIN") ||
+    candidate.user.emailVerifiedAt
+  ) {
+    await recordSecurityThrottleFailure(buckets, {
+      windowMs: VERIFICATION_WINDOW_MS,
+      lockMs: VERIFICATION_LOCK_MS,
+      retentionMs: 24 * 60 * 60 * 1000,
+    });
+    return fail("This invitation is invalid or has expired.");
+  }
+
   const passwordHash = await hashPassword(parsed.data.password);
   const result = await prisma.$transaction(async (tx) => {
     const invitation = await tx.staffEmailVerificationToken.findUnique({
-      where: { tokenHash },
+      where: { tokenHash, deliveredAt: { not: null } },
       include: { user: { select: { id: true, role: true, isActive: true, emailVerifiedAt: true } } },
     });
     if (
@@ -99,7 +143,7 @@ export async function completeAgentInvitation(
     }
 
     const consumed = await tx.staffEmailVerificationToken.deleteMany({
-      where: { id: invitation.id, tokenHash, expiresAt: { gt: new Date() } },
+      where: { id: invitation.id, tokenHash, deliveredAt: { not: null }, expiresAt: { gt: new Date() } },
     });
     if (consumed.count !== 1) {
       return { success: false as const, error: "This invitation is invalid or has expired." };
@@ -112,6 +156,9 @@ export async function completeAgentInvitation(
         emailVerifiedAt: new Date(),
         sessionVersion: { increment: 1 },
       },
+    });
+    await tx.staffEmailVerificationToken.deleteMany({
+      where: { userId: invitation.user.id },
     });
     await createAuditLog(tx, {
       actorId: invitation.user.id,
@@ -126,5 +173,14 @@ export async function completeAgentInvitation(
     return { success: true as const, agentId: invitation.user.id };
   }, { isolationLevel: "Serializable" });
 
-  return result.success ? ok({ agentId: result.agentId }) : fail(result.error);
+  if (!result.success) {
+    await recordSecurityThrottleFailure(buckets, {
+      windowMs: VERIFICATION_WINDOW_MS,
+      lockMs: VERIFICATION_LOCK_MS,
+      retentionMs: 24 * 60 * 60 * 1000,
+    });
+    return fail(result.error);
+  }
+  await clearSecurityThrottle([buckets[0]]);
+  return ok({ agentId: result.agentId });
 }
