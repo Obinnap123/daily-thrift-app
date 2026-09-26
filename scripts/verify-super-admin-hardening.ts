@@ -62,7 +62,7 @@ async function main() {
             )
         ) AS required_index_count,
         (
-          SELECT COUNT(*)::int
+          SELECT COUNT(DISTINCT trigger_name)::int
           FROM information_schema.triggers
           WHERE trigger_schema = 'public'
             AND trigger_name IN (
