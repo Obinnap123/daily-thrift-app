@@ -14,11 +14,10 @@ import { createAgent, updateAgent, setAgentActive } from "@/server/services/agen
 import type { CreateAgentInput, EditAgentInput, SetAgentActiveInput } from "@/validations/auth";
 import { revalidatePath } from "next/cache";
 import { writeAuditLog } from "@/server/services/audit.service";
-import { sendAgentInvitationEmail } from "@/server/services/email.service";
-import { getApplicationOrigin } from "@/lib/application-origin";
 import { hashStaffVerificationToken } from "@/lib/staff-verification-token";
 import { ok } from "@/lib/action-result";
 import { refreshAgentInvitationToken } from "@/server/services/staff-email-verification.service";
+import { deliverStaffInvitation } from "@/server/services/staff-invitation-delivery.service";
 
 export async function createAgentAction(input: CreateAgentInput) {
   const user = await requireRole("ADMIN");
@@ -29,12 +28,14 @@ export async function createAgentAction(input: CreateAgentInput) {
   if (result.success) {
     let invitationSent = false;
     try {
-      const delivery = await sendAgentInvitationEmail({
-        to: result.data.email,
-        agentName: result.data.name,
-        invitationToken: result.data.invitationToken,
-        applicationOrigin: await getApplicationOrigin(),
+      const delivery = await deliverStaffInvitation({
+        userId: result.data.id,
+        email: result.data.email,
+        name: result.data.name,
+        token: result.data.invitationToken,
+        tokenHash: hashStaffVerificationToken(result.data.invitationToken),
         idempotencyKey: invitationIdempotencyKey(result.data.id, result.data.invitationToken),
+        role: "Agent",
       });
       invitationSent = delivery.success;
       await writeAuditLog({
@@ -72,12 +73,14 @@ export async function resendAgentInvitationAction(agentId: string) {
 
   let delivery;
   try {
-    delivery = await sendAgentInvitationEmail({
-      to: invitation.data.email,
-      agentName: invitation.data.name,
-      invitationToken: invitation.data.invitationToken,
-      applicationOrigin: await getApplicationOrigin(),
+    delivery = await deliverStaffInvitation({
+      userId: invitation.data.id,
+      email: invitation.data.email,
+      name: invitation.data.name,
+      token: invitation.data.invitationToken,
+      tokenHash: hashStaffVerificationToken(invitation.data.invitationToken),
       idempotencyKey: invitationIdempotencyKey(invitation.data.id, invitation.data.invitationToken),
+      role: "Agent",
     });
   } catch {
     delivery = { success: false as const, message: "The verification email could not be sent." };
@@ -109,12 +112,14 @@ export async function updateAgentAction(input: EditAgentInput) {
     let invitationSent: boolean | null = null;
     if (result.data.emailChanged && result.data.invitationToken) {
       try {
-        const delivery = await sendAgentInvitationEmail({
-          to: result.data.email,
-          agentName: result.data.name,
-          invitationToken: result.data.invitationToken,
-          applicationOrigin: await getApplicationOrigin(),
+        const delivery = await deliverStaffInvitation({
+          userId: result.data.id,
+          email: result.data.email,
+          name: result.data.name,
+          token: result.data.invitationToken,
+          tokenHash: hashStaffVerificationToken(result.data.invitationToken),
           idempotencyKey: invitationIdempotencyKey(result.data.id, result.data.invitationToken),
+          role: "Agent",
         });
         invitationSent = delivery.success;
         await writeAuditLog({

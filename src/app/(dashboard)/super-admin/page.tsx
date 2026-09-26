@@ -13,7 +13,7 @@ export default async function SuperAdminOverview() {
   await requireRole("SUPER_ADMIN");
   const [financial, admin, recent, customerCount, agentCount] = await Promise.all([
     getFinancialOverview(),
-    prisma.user.findFirst({ where: { role: "ADMIN", isActive: true }, select: { name: true, email: true, lastLoginAt: true, emailVerifiedAt: true } }),
+    prisma.user.findFirst({ where: { role: "ADMIN", isActive: true, archivedAt: null }, select: { name: true, email: true, lastLoginAt: true, emailVerifiedAt: true } }),
     prisma.auditLog.findMany({ where: { actorRole: "ADMIN" }, orderBy: { createdAt: "desc" }, take: 6, include: { actor: { select: { name: true } } } }),
     prisma.user.count({ where: { role: "CUSTOMER" } }),
     prisma.user.count({ where: { role: "AGENT", isActive: true } }),

@@ -4,27 +4,19 @@ import { calculateAvailableBalance } from "@/lib/financial-metrics";
 
 export async function getFinancialOverview() {
   const businessDate = today();
-  const [row] = await prisma.$queryRaw<Array<{
-    lifetime: unknown;
-    active: unknown;
-    grossClosed: unknown;
-    paid: unknown;
-    paidToday: unknown;
-    commission: unknown;
-  }>>`
-    SELECT
-      COALESCE((SELECT SUM(c.amount) FROM contributions c WHERE c.status = 'COLLECTED'), 0) AS lifetime,
-      COALESCE((SELECT SUM(c.amount) FROM contributions c WHERE c.status = 'COLLECTED'), 0)
-        - COALESCE((SELECT SUM(p."grossSavings") FROM payouts p), 0) AS active,
-      COALESCE((SELECT SUM(p."grossSavings") FROM payouts p), 0) AS "grossClosed",
-      COALESCE((SELECT SUM(p."customerAmount") FROM payouts p), 0) AS paid,
-      COALESCE((SELECT SUM(p."customerAmount") FROM payouts p WHERE p."payoutDate" = ${businessDate}), 0) AS "paidToday",
-      COALESCE((SELECT SUM(p."commissionAmount") FROM payouts p), 0) AS commission
-  `;
+  const [summary, paidToday] = await Promise.all([
+    prisma.businessFinancialSummary.findUniqueOrThrow({
+      where: { id: "default" },
+    }),
+    prisma.payout.aggregate({
+      where: { payoutDate: businessDate },
+      _sum: { customerAmount: true },
+    }),
+  ]);
 
-  const lifetimeCollections = Number(row?.lifetime ?? 0);
-  const grossSavingsClosedByPayouts = Number(row?.grossClosed ?? 0);
-  const paidOutToCustomersAllTime = Number(row?.paid ?? 0);
+  const lifetimeCollections = Number(summary.lifetimeCollections);
+  const grossSavingsClosedByPayouts = Number(summary.grossSavingsClosed);
+  const paidOutToCustomersAllTime = Number(summary.paidOutToCustomers);
 
   return {
     lifetimeCollections,
@@ -32,10 +24,13 @@ export async function getFinancialOverview() {
       lifetimeCollections,
       grossSavingsClosedByPayouts,
     ),
-    activeSavings: Number(row?.active ?? 0),
-    paidOutToday: Number(row?.paidToday ?? 0),
+    activeSavings: calculateAvailableBalance(
+      lifetimeCollections,
+      grossSavingsClosedByPayouts,
+    ),
+    paidOutToday: Number(paidToday._sum.customerAmount ?? 0),
     paidOutToCustomersAllTime,
-    commissionEarned: Number(row?.commission ?? 0),
+    commissionEarned: Number(summary.commissionEarned),
   };
 }
 
