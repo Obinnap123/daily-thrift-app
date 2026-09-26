@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "node api.js && next dev",
+    "build": "node api.js && next build",
     "postinstall": "prisma generate",
-    "start": "next start",
+    "start": "node api.js && next start",
     "lint": "eslint",
     "test:unit": "tsx --conditions=react-server --test tests/unit.test.ts tests/super-admin.test.ts",
     "db:generate": "prisma generate",
